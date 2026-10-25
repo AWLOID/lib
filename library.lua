@@ -1010,7 +1010,7 @@ local function AddSlider(W, S, o)
 	Method(el, "Get", function() return value end)
 	Method(el, "SetName", function(t) lbl.Text = tostring(t) end)
 	Method(el, "SetRange", function(mn, mx)
-		minV, maxV = mn or minV, mx or maxV
+		minV, maxV = tonumber(mn) or minV, tonumber(mx) or maxV
 		if maxV <= minV then maxV = minV + 1 end
 		SetValue(value)
 	end)
@@ -2145,7 +2145,519 @@ local function AddDivider(W, S, o)
 	return el
 end
 
-local ELEMENT_KINDS = {"Toggle", "Slider", "Dropdown", "MultiDropdown", "Button", "CardButton", "ColorPicker", "Input", "Keybind", "Label", "Paragraph", "Divider"}
+-- Readable foreground for text/icons drawn on top of the accent color.
+local function OnAccent(W)
+	if W.AccentAlpha < 0.5 then return W.Theme.Text end
+	local c = W.Accent
+	local l = 0.299 * c.R + 0.587 * c.G + 0.114 * c.B
+	return l > 0.62 and rgb(20, 20, 24) or WHITE
+end
+
+local EL_TI = TweenInfo.new(0.14, Enum.EasingStyle.Quad)
+local MOVE_TI = TweenInfo.new(0.2, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+
+local function AddCheckbox(W, S, o)
+	o = Opts(o)
+	local el, row = NewElement(W, S, "Checkbox", o, 21)
+	local state = (o.Default or o.Value) == true
+	el.Value = state
+
+	local click = Create("TextButton", {Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "", Parent = row})
+	local box = Create("TextButton", {
+		Size = UDim2.fromOffset(14, 14),
+		Position = UDim2.new(0, 0, 0.5, -7),
+		BorderSizePixel = 0,
+		Text = "",
+		AutoButtonColor = false,
+		ZIndex = 2,
+		Parent = row,
+	})
+	Corner(box, 3)
+	local bs = Stroke(box, WHITE, 1)
+	local check = CreateIcon(box, {"check"}, 10, UDim2.new(0.5, -5, 0.5, -5))
+	check.ZIndex = 3
+	local lbl = Label(row, o.Name or o.Title or "Checkbox", {Position = UDim2.fromOffset(22, 0), Size = UDim2.new(1, -22, 1, 0), Truncate = true})
+	local hover = false
+
+	function el._apply(animate)
+		local T, enabled = W.Theme, el.Enabled
+		local a = W.AccentAlpha * (enabled and 1 or 0.45)
+		local bg = state and W.Accent or (enabled and T.ToggleOffBg or T.ToggleOffBgOff)
+		local bgT = state and (1 - a) or 0
+		local iT = state and 0 or 1
+		if animate then
+			Tween(box, EL_TI, {BackgroundColor3 = bg, BackgroundTransparency = bgT})
+			Tween(check, EL_TI, {ImageTransparency = iT})
+		else
+			StopTweens(box, check)
+			box.BackgroundColor3, box.BackgroundTransparency = bg, bgT
+			check.ImageTransparency = iT
+		end
+		check.ImageColor3 = OnAccent(W)
+		bs.Color = state and W.Accent or (enabled and T.DropdownBorder or T.DropdownBorderOff)
+		bs.Transparency = state and (1 - a) or 0
+		lbl.TextColor3 = not enabled and T.TextDim or ((state or hover) and T.Text or T.TextGray)
+	end
+	W.Bind(function() el._apply(false) end, row)
+
+	Method(el, "Set", function(v, silent)
+		v = v and true or false
+		local changed = v ~= state
+		state = v
+		el.Value = v
+		el._apply(true)
+		if changed and not silent then el._fire(v) else el._sync(v) end
+	end)
+	Method(el, "Get", function() return state end)
+	Method(el, "Toggle", function() el.Set(not state) end)
+	Method(el, "SetName", function(t) lbl.Text = tostring(t) end)
+
+	local function OnClick() if el.Enabled then el.Set(not state) end end
+	click.MouseButton1Click:Connect(OnClick)
+	box.MouseButton1Click:Connect(OnClick)
+	click.MouseEnter:Connect(function() hover = true el._apply(false) end)
+	click.MouseLeave:Connect(function() hover = false el._apply(false) end)
+	return Finish(el, o)
+end
+
+local function AddSegmented(W, S, o)
+	o = Opts(o)
+	local options = CopyList(o.Options or o.Values or o.List)
+	local name = o.Name or o.Title
+	local top = name and 19 or 0
+	local el, row = NewElement(W, S, "Segmented", o, top + 25)
+	local value = o.Default or o.Value
+	if not IndexOf(options, value) then value = options[1] end
+	el.Value = value
+
+	local lbl = name and Label(row, name, {Size = UDim2.new(1, 0, 0, 15), Truncate = true}) or nil
+	local bar = Create("Frame", {Size = UDim2.new(1, 0, 0, 25), Position = UDim2.fromOffset(0, top), BorderSizePixel = 0, Parent = row})
+	Corner(bar, 5)
+	local bs = Stroke(bar, WHITE, 1)
+	local ind = Create("Frame", {BorderSizePixel = 0, ZIndex = 2, Parent = bar})
+	Corner(ind, 4)
+	local buttons = {}
+
+	local function Layout(animate)
+		local n = math.max(#options, 1)
+		local i = IndexOf(options, value)
+		ind.Visible = i ~= nil
+		if not i then return end
+		local props = {Position = UDim2.new((i - 1) / n, 2, 0, 2), Size = UDim2.new(1 / n, -4, 1, -4)}
+		if animate then
+			Tween(ind, MOVE_TI, props)
+		else
+			StopTweens(ind)
+			ind.Position, ind.Size = props.Position, props.Size
+		end
+	end
+	function el._apply()
+		local T, enabled = W.Theme, el.Enabled
+		bar.BackgroundColor3 = T.DropdownBg
+		bs.Color = enabled and T.DropdownBorder or T.DropdownBorderOff
+		ind.BackgroundColor3 = W.Accent
+		ind.BackgroundTransparency = 1 - W.AccentAlpha * (enabled and 1 or 0.45)
+		if lbl then lbl.TextColor3 = enabled and T.TextGray or T.TextDim end
+		for i, b in ipairs(buttons) do
+			local sel = options[i] == value
+			b.TextColor3 = not enabled and T.TextDim or (sel and OnAccent(W) or T.TextGray)
+			ApplyFont(b, sel and "SemiBold" or "Medium")
+		end
+	end
+
+	local function Build()
+		for _, b in ipairs(buttons) do b:Destroy() end
+		table.clear(buttons)
+		local n = math.max(#options, 1)
+		for i, opt in ipairs(options) do
+			local b = Create("TextButton", {
+				Size = UDim2.new(1 / n, 0, 1, 0),
+				Position = UDim2.new((i - 1) / n, 0, 0, 0),
+				BackgroundTransparency = 1,
+				Text = tostring(opt),
+				TextSize = TEXT,
+				Weight = "Medium",
+				TextTruncate = Enum.TextTruncate.AtEnd,
+				AutoButtonColor = false,
+				ZIndex = 3,
+				Parent = bar,
+			})
+			b.MouseButton1Click:Connect(function() if el.Enabled then el.Set(opt) end end)
+			buttons[i] = b
+		end
+		Layout(false)
+		el._apply()
+	end
+	W.Bind(function() el._apply() end, row)
+	Build()
+
+	local function Commit(changed, silent)
+		el.Value = value
+		el._apply()
+		if changed and not silent then el._fire(value) else el._sync(value) end
+	end
+	Method(el, "Set", function(v, silent)
+		if not IndexOf(options, v) then return end
+		local changed = v ~= value
+		value = v
+		Layout(true)
+		Commit(changed, silent)
+	end)
+	Method(el, "Get", function() return value end)
+	Method(el, "GetOptions", function() return CopyList(options) end)
+	Method(el, "SetOptions", function(list, silent)
+		local before = value
+		options = CopyList(list)
+		if not IndexOf(options, value) then value = options[1] end
+		Build()
+		Commit(value ~= before, silent)
+	end)
+	Method(el, "SetName", function(t) if lbl then lbl.Text = tostring(t) end end)
+	return Finish(el, o)
+end
+
+local function AddProgressBar(W, S, o)
+	o = Opts(o)
+	local el, row = NewElement(W, S, "ProgressBar", {Enabled = o.Enabled, Disabled = o.Disabled, Visible = o.Visible}, 23)
+	local maxV = tonumber(o.Max) or 100
+	if maxV <= 0 then maxV = 100 end
+	local value = math.clamp(tonumber(o.Default or o.Value) or 0, 0, maxV)
+	el.Value = value
+
+	local lbl = Label(row, o.Name or o.Title or "Progress", {Size = UDim2.new(0.65, 0, 0, 15), Truncate = true})
+	local valLbl = Label(row, "", {Position = UDim2.new(0.65, 0, 0, 0), Size = UDim2.new(0.35, 0, 0, 15), Align = Enum.TextXAlignment.Right})
+	local track = Create("Frame", {Size = UDim2.new(1, 0, 0, 4), Position = UDim2.fromOffset(0, 17), BorderSizePixel = 0, Parent = row})
+	Corner(track, 2)
+	local fill = Create("Frame", {Size = UDim2.fromScale(0, 1), BorderSizePixel = 0, Parent = track})
+	Corner(fill, 2)
+
+	local function Text()
+		if type(o.Format) == "function" then return tostring(SafeCall(o.Format, value, maxV) or "") end
+		if o.ShowValue then
+			return FormatNumber(value, Decimals(o.Step or 1)) .. " / " .. FormatNumber(maxV, Decimals(o.Step or 1))
+		end
+		return math.floor(value / maxV * 100 + 0.5) .. "%"
+	end
+	local function Layout(animate)
+		local props = {Size = UDim2.fromScale(value / maxV, 1)}
+		if animate then
+			Tween(fill, TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), props)
+		else
+			StopTweens(fill)
+			fill.Size = props.Size
+		end
+		valLbl.Text = Text()
+	end
+	Layout(false)
+	function el._apply()
+		local T, enabled = W.Theme, el.Enabled
+		lbl.TextColor3 = enabled and T.TextGray or T.TextDim
+		valLbl.TextColor3 = enabled and T.TextGray or T.TextDim
+		track.BackgroundColor3 = T.SliderTrack
+		fill.BackgroundColor3 = W.Accent
+		fill.BackgroundTransparency = 1 - W.AccentAlpha * (enabled and 1 or 0.45)
+	end
+	W.Bind(function() el._apply() end, row)
+
+	Method(el, "Set", function(v, instant)
+		v = math.clamp(tonumber(v) or 0, 0, maxV)
+		if v == value then return end
+		value = v
+		el.Value = v
+		Layout(not instant)
+		el._fire(v)
+	end)
+	Method(el, "Get", function() return value end)
+	Method(el, "Increment", function(d) el.Set(value + (tonumber(d) or 1)) end)
+	Method(el, "SetMax", function(m)
+		m = tonumber(m)
+		if not m or m <= 0 then return end
+		maxV = m
+		value = math.min(value, maxV)
+		el.Value = value
+		Layout(true)
+	end)
+	Method(el, "GetMax", function() return maxV end)
+	Method(el, "SetName", function(t) lbl.Text = tostring(t) end)
+	if o.DependsOn then el.DependsOn(o.DependsOn, o.InvertDependency) end
+	el._apply()
+	return el
+end
+
+local function AddRangeSlider(W, S, o)
+	o = Opts(o)
+	local EXTRA = 2
+	local el, row = NewElement(W, S, "RangeSlider", o, 28 + EXTRA)
+	local minV, maxV = tonumber(o.Min) or 0, tonumber(o.Max) or 100
+	if maxV <= minV then maxV = minV + 1 end
+	local step = tonumber(o.Step or o.Increment) or 1
+	local decimals = o.Decimals or Decimals(step)
+
+	local function Round(v)
+		v = tonumber(v) or minV
+		if step > 0 then v = math.floor((v - minV) / step + 0.5) * step + minV end
+		v = math.clamp(v, minV, maxV)
+		return tonumber(FormatNumber(v, decimals)) or v
+	end
+	local def = o.Default or o.Value
+	if type(def) ~= "table" then def = {minV, maxV} end
+	local lo, hi = Round(def[1] or def.Min or minV), Round(def[2] or def.Max or maxV)
+	if lo > hi then lo, hi = hi, lo end
+	local function Value() return {lo, hi} end
+	el.Value = Value()
+
+	local function Fmt(v)
+		if type(o.Format) == "function" then return tostring(o.Format(v)) end
+		return FormatNumber(v, decimals) .. (o.Suffix or "")
+	end
+
+	local lbl = Label(row, o.Name or o.Title or "Range", {Position = UDim2.fromOffset(0, EXTRA), Size = UDim2.new(0.5, 0, 0, 15), Truncate = true})
+	local valLbl = Label(row, "", {Position = UDim2.new(0.5, 0, 0, EXTRA), Size = UDim2.new(0.5, 0, 0, 15), Align = Enum.TextXAlignment.Right})
+	local hit = Create("Frame", {Size = UDim2.new(1, 0, 0, 16), Position = UDim2.fromOffset(0, EXTRA + 12.5), BackgroundTransparency = 1, Active = true, Parent = row})
+	local track = Create("Frame", {Size = UDim2.new(1, 0, 0, 4), Position = UDim2.new(0, 0, 0.5, -2), BorderSizePixel = 0, Parent = hit})
+	Corner(track, 2)
+	local R = 5.5
+	local fill = Create("Frame", {BorderSizePixel = 0, Parent = track})
+	local knobs, strokes = {}, {}
+	for i = 1, 2 do
+		knobs[i] = Create("Frame", {Size = UDim2.fromOffset(7, 7), BorderSizePixel = 0, ZIndex = 3, Parent = track})
+		Corner(knobs[i], 4)
+		strokes[i] = Stroke(knobs[i], WHITE, 2)
+	end
+
+	local function P(v) return (v - minV) / (maxV - minV) end
+	local function Layout(animate)
+		local a, b = P(lo), P(hi)
+		local fp = UDim2.new(a, R * (1 - 2 * a), 0, 0)
+		local fs = UDim2.new(b - a, 2 * R * (a - b), 1, 0)
+		local k1 = UDim2.new(a, R * (1 - 2 * a) - 3.5, 0.5, -3.5)
+		local k2 = UDim2.new(b, R * (1 - 2 * b) - 3.5, 0.5, -3.5)
+		if animate then
+			local ti = TweenInfo.new(0.12, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+			Tween(fill, ti, {Position = fp, Size = fs})
+			Tween(knobs[1], ti, {Position = k1})
+			Tween(knobs[2], ti, {Position = k2})
+		else
+			StopTweens(fill, knobs[1], knobs[2])
+			fill.Position, fill.Size = fp, fs
+			knobs[1].Position, knobs[2].Position = k1, k2
+		end
+		valLbl.Text = Fmt(lo) .. " - " .. Fmt(hi)
+	end
+	Layout(false)
+
+	function el._apply()
+		local T, enabled = W.Theme, el.Enabled
+		lbl.TextColor3 = enabled and T.TextGray or T.TextDim
+		valLbl.TextColor3 = enabled and T.TextGray or T.TextDim
+		track.BackgroundColor3 = T.SliderTrack
+		fill.BackgroundColor3 = W.Accent
+		fill.BackgroundTransparency = 1 - W.AccentAlpha * (enabled and 1 or 0.45)
+		for i = 1, 2 do
+			knobs[i].BackgroundColor3 = T.KnobFill
+			strokes[i].Color = enabled and T.KnobStroke or T.KnobStrokeOff
+		end
+	end
+	W.Bind(function() el._apply() end, row)
+
+	local function SetValues(a, b, silent, animate)
+		a, b = Round(a), Round(b)
+		if a > b then a, b = b, a end
+		local changed = a ~= lo or b ~= hi
+		lo, hi = a, b
+		el.Value = Value()
+		Layout(animate ~= false)
+		if changed and not silent then el._fire(el.Value) else el._sync(el.Value) end
+	end
+
+	local active
+	local function ValueAt(input)
+		local sc = W.Scale.Scale
+		local left = track.AbsolutePosition.X + R * sc
+		local width = track.AbsoluteSize.X - 2 * R * sc
+		if width <= 0 then return nil end
+		return minV + (maxV - minV) * math.clamp((input.Position.X - left) / width, 0, 1)
+	end
+	local function Update(input)
+		local v = ValueAt(input)
+		if not v then return end
+		if active == 1 then
+			SetValues(math.min(v, hi), hi)
+		else
+			SetValues(lo, math.max(v, lo))
+		end
+	end
+	hit.InputBegan:Connect(function(input)
+		if not (el.Enabled and IsClickOrTouch(input)) then return end
+		local v = ValueAt(input)
+		if not v then return end
+		if v <= lo then
+			active = 1
+		elseif v >= hi then
+			active = 2
+		else
+			active = (v - lo <= hi - v) and 1 or 2
+		end
+		if W.BeginDrag(input, Update) then Update(input) end
+	end)
+
+	Method(el, "Set", function(v, silent)
+		if type(v) ~= "table" then return end
+		SetValues(v[1] or v.Min or lo, v[2] or v.Max or hi, silent)
+	end)
+	Method(el, "SetValues", function(a, b, silent) SetValues(a or lo, b or hi, silent) end)
+	Method(el, "Get", Value)
+	Method(el, "GetMin", function() return lo end)
+	Method(el, "GetMax", function() return hi end)
+	Method(el, "SetRange", function(mn, mx)
+		minV, maxV = tonumber(mn) or minV, tonumber(mx) or maxV
+		if maxV <= minV then maxV = minV + 1 end
+		SetValues(lo, hi)
+	end)
+	Method(el, "SetName", function(t) lbl.Text = tostring(t) end)
+	Method(el, "SetSuffix", function(s) o.Suffix = s Layout(false) end)
+	return Finish(el, o)
+end
+
+local function AddStepper(W, S, o)
+	o = Opts(o)
+	local el, row = NewElement(W, S, "Stepper", o, 25)
+	local minV, maxV = tonumber(o.Min) or 0, tonumber(o.Max) or 100
+	if maxV < minV then minV, maxV = maxV, minV end
+	local step = tonumber(o.Step or o.Increment) or 1
+	if step <= 0 then step = 1 end
+	local decimals = o.Decimals or Decimals(step)
+	local function Round(v)
+		v = tonumber(v)
+		if not v or v ~= v then return nil end
+		v = math.floor((v - minV) / step + 0.5) * step + minV
+		v = math.clamp(v, minV, maxV)
+		return tonumber(FormatNumber(v, decimals)) or v
+	end
+	local value = Round(o.Default or o.Value) or minV
+	el.Value = value
+
+	local W_BTN, W_VAL = 23, 48
+	local total = W_BTN * 2 + W_VAL
+	local lbl = Label(row, o.Name or o.Title or "Stepper", {Size = UDim2.new(1, -(total + 8), 1, 0), Truncate = true})
+	local frame = Create("Frame", {
+		Size = UDim2.fromOffset(total, 25),
+		Position = UDim2.new(1, -total, 0, 0),
+		BorderSizePixel = 0,
+		Parent = row,
+	})
+	Corner(frame, 5)
+	local fs = Stroke(frame, WHITE, 1)
+	local function SideButton(x, icon)
+		local b = Create("TextButton", {Size = UDim2.fromOffset(W_BTN, 25), Position = UDim2.fromOffset(x, 0), BackgroundTransparency = 1, Text = "", AutoButtonColor = false, ZIndex = 2, Parent = frame})
+		local ic = CreateIcon(b, icon, 10, UDim2.new(0.5, -5, 0.5, -5))
+		return b, ic
+	end
+	local minus, minusIc = SideButton(0, {"minus"})
+	local plus, plusIc = SideButton(W_BTN + W_VAL, {"plus"})
+	local seps = {}
+	for i, x in ipairs({W_BTN, W_BTN + W_VAL - 1}) do
+		seps[i] = Create("Frame", {Size = UDim2.fromOffset(1, 13), Position = UDim2.fromOffset(x, 6), BorderSizePixel = 0, Parent = frame})
+	end
+	local box = Create("TextBox", {
+		Size = UDim2.fromOffset(W_VAL, 25),
+		Position = UDim2.fromOffset(W_BTN, 0),
+		BackgroundTransparency = 1,
+		Text = "",
+		ClearTextOnFocus = false,
+		TextSize = TEXT,
+		Weight = "Medium",
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		ZIndex = 2,
+		Parent = frame,
+	})
+
+	local hoverMinus, hoverPlus = false, false
+	function el._apply()
+		local T, enabled = W.Theme, el.Enabled
+		lbl.TextColor3 = enabled and T.TextGray or T.TextDim
+		frame.BackgroundColor3 = T.DropdownBg
+		fs.Color = enabled and T.DropdownBorder or T.DropdownBorderOff
+		box.TextColor3 = enabled and T.Text or T.ValueOff
+		box.TextEditable = enabled
+		local canDown, canUp = enabled and value > minV, enabled and value < maxV
+		minusIc.ImageColor3 = not canDown and T.TextDim or (hoverMinus and T.Text or T.TextGray)
+		plusIc.ImageColor3 = not canUp and T.TextDim or (hoverPlus and T.Text or T.TextGray)
+		for _, s in ipairs(seps) do s.BackgroundColor3 = T.DropdownBorder end
+	end
+	W.Bind(function() el._apply() end, row)
+
+	local function Show() box.Text = FormatNumber(value, decimals) .. (o.Suffix or "") end
+	local function SetValue(v, silent)
+		v = Round(v)
+		if not v then Show() return end
+		local changed = v ~= value
+		value = v
+		el.Value = v
+		Show()
+		el._apply()
+		if changed and not silent then el._fire(v) else el._sync(v) end
+	end
+	Show()
+
+	local holdToken = 0
+	local function StopHold() holdToken = holdToken + 1 end
+	local function StartHold(dir)
+		StopHold()
+		local token = holdToken
+		SetValue(value + dir * step)
+		task.delay(0.4, function()
+			while token == holdToken and row.Parent and el.Enabled do
+				local before = value
+				SetValue(value + dir * step)
+				if value == before then break end
+				task.wait(0.06)
+			end
+		end)
+	end
+	for _, pair in ipairs({{minus, -1}, {plus, 1}}) do
+		local b, dir = pair[1], pair[2]
+		b.InputBegan:Connect(function(input)
+			if el.Enabled and IsClickOrTouch(input) then StartHold(dir) end
+		end)
+		b.InputEnded:Connect(function(input)
+			if IsClickOrTouch(input) then StopHold() end
+		end)
+		b.MouseEnter:Connect(function()
+			if dir < 0 then hoverMinus = true else hoverPlus = true end
+			el._apply()
+		end)
+		b.MouseLeave:Connect(function()
+			StopHold()
+			if dir < 0 then hoverMinus = false else hoverPlus = false end
+			el._apply()
+		end)
+	end
+	box.Focused:Connect(function() box.Text = FormatNumber(value, decimals) end)
+	box.FocusLost:Connect(function()
+		local text = box.Text:gsub("[^%d%.%-]", "")
+		SetValue(tonumber(text) or value)
+	end)
+
+	Method(el, "Set", function(v, silent) SetValue(v, silent) end)
+	Method(el, "Get", function() return value end)
+	Method(el, "Increment", function(n) SetValue(value + (tonumber(n) or 1) * step) end)
+	Method(el, "Decrement", function(n) SetValue(value - (tonumber(n) or 1) * step) end)
+	Method(el, "SetRange", function(mn, mx)
+		minV, maxV = tonumber(mn) or minV, tonumber(mx) or maxV
+		if maxV < minV then minV, maxV = maxV, minV end
+		SetValue(value)
+	end)
+	Method(el, "SetName", function(t) lbl.Text = tostring(t) end)
+	local baseDestroy = el.Destroy
+	Method(el, "Destroy", function() StopHold() baseDestroy() end)
+	return Finish(el, o)
+end
+
+local ELEMENT_KINDS = {
+	"Toggle", "Slider", "Dropdown", "MultiDropdown", "Button", "CardButton", "ColorPicker", "Input", "Keybind",
+	"Label", "Paragraph", "Divider", "Checkbox", "Segmented", "ProgressBar", "RangeSlider", "Stepper",
+}
 
 function ElementApi(W, S)
 	Method(S, "AddToggle", function(x) return AddToggle(W, S, x) end)
@@ -2160,6 +2672,12 @@ function ElementApi(W, S)
 	Method(S, "AddParagraph", function(x) return AddParagraph(W, S, x) end)
 	Method(S, "AddDivider", function(x) return AddDivider(W, S, x) end)
 	S.AddTextbox, S.AddTextBox = S.AddInput, S.AddInput
+	Method(S, "AddCheckbox", function(x) return AddCheckbox(W, S, x) end)
+	Method(S, "AddSegmented", function(x) return AddSegmented(W, S, x) end)
+	Method(S, "AddProgressBar", function(x) return AddProgressBar(W, S, x) end)
+	Method(S, "AddRangeSlider", function(x) return AddRangeSlider(W, S, x) end)
+	Method(S, "AddStepper", function(x) return AddStepper(W, S, x) end)
+	S.AddCheckBox, S.AddProgress, S.AddNumber = S.AddCheckbox, S.AddProgressBar, S.AddStepper
 	Method(S, "AddButton", function(x)
 		x = Opts(x)
 		if x.Icon or x.Description or x.Desc or x.ButtonText then return AddCardButton(W, S, x) end
@@ -2751,7 +3269,7 @@ local function Notify(W, o)
 		bar.BackgroundTransparency = 1 - alpha
 	end, holder)
 
-	local duration = o.Duration or o.Time or 4
+	local duration = math.max(tonumber(o.Duration or o.Time) or 4, 0.1)
 	Tween(card, TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {Position = UDim2.fromOffset(0, 0)})
 	Tween(bar, TweenInfo.new(duration, Enum.EasingStyle.Linear), {Size = UDim2.new(0, 0, 0, 2)})
 	local closed = false
@@ -4256,7 +4774,7 @@ local function CreateWindow(o)
 		Pages = {}, Tabs = {}, Elements = {}, HeaderButtons = {}, AccentIcons = {}, UnloadCallbacks = {},
 		BarW = math.clamp(math.floor(tonumber(o.ScrollbarSize) or 6), 3, 24),
 		WheelScroll = o.MouseWheel == true,
-		ToggleKey = o.ToggleKey or o.Keybind or Enum.KeyCode.RightShift,
+		ToggleKey = ParseKey(o.ToggleKey or o.Keybind) or Enum.KeyCode.RightShift,
 		Nav = {main = "settings"},
 		NotifyOrder = 0,
 		ConfigFolder = o.ConfigFolder or Library.ConfigFolder,
@@ -4416,6 +4934,9 @@ local function CreateWindow(o)
 	end
 	function W.SetScale(s, animate)
 		s = math.clamp(tonumber(s) or 1, 0.3, 3)
+		W.UserScale = s
+		-- The open/close animation drives W.Scale; it lands on UserScale when it finishes.
+		if W.Animating then return end
 		if animate then
 			Tween(W.Scale, TweenInfo.new(0.18), {Scale = s})
 		else
@@ -4450,13 +4971,76 @@ local function CreateWindow(o)
 	W.WatermarkApi = BuildWatermark(W, o.Watermark)
 	BuildShell(W)
 	BuildNavigation(W)
+
+	W.UserScale = W.Scale.Scale
+	W.Visible = true
+	W.Animate = o.Animation ~= false and o.Animations ~= false
+	-- CanvasGroup is only used while animating (wrapping Main) so the window can fade as one layer.
+	local okFader, Fader = pcall(Create, "CanvasGroup", {
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1,
+		Visible = false,
+		Parent = W.Holder,
+	})
+	if not okFader then Fader = nil end
+	local OPEN_TI = TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+	local CLOSE_TI = TweenInfo.new(0.2, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+	local CLOSED_SCALE = 0.94
+	local animToken = 0
+	local function Unwrap()
+		if Fader and W.Main.Parent == Fader then
+			W.Main.Parent = W.Holder
+		end
+		if Fader then
+			Fader.Visible = false
+			Fader.GroupTransparency = 0
+		end
+	end
+	function W.SetShown(show, instant)
+		if not W.Alive then return end
+		show = show ~= false
+		W.Visible = show
+		animToken = animToken + 1
+		local token = animToken
+		if not show then
+			W.ClosePopup()
+			W.CancelDrag()
+		end
+		StopTweens(W.Scale, Fader)
+		if instant or not W.Animate or (not show and not W.Holder.Visible) then
+			W.Animating = false
+			Unwrap()
+			W.Scale.Scale = W.UserScale
+			W.Holder.Visible = show
+			return
+		end
+		local fresh = not W.Holder.Visible
+		W.Animating = true
+		W.Holder.Visible = true
+		if Fader and W.Main.Parent ~= Fader then
+			Fader.GroupTransparency = fresh and 1 or 0
+			Fader.Visible = true
+			W.Main.Parent = Fader
+		end
+		if fresh then W.Scale.Scale = W.UserScale * CLOSED_SCALE end
+		local ti = show and OPEN_TI or CLOSE_TI
+		local t = Tween(W.Scale, ti, {Scale = W.UserScale * (show and 1 or CLOSED_SCALE)})
+		if Fader then Tween(Fader, ti, {GroupTransparency = show and 0 or 1}) end
+		t.Completed:Connect(function()
+			if token ~= animToken or not W.Alive then return end
+			W.Animating = false
+			if not show then W.Holder.Visible = false end
+			Unwrap()
+			W.Scale.Scale = W.UserScale
+		end)
+	end
 	local settingsApi = BuildSettings(W, o)
 	if o.Scale then W.SetScale(o.Scale) end
 	W.RefreshNav(true)
 
 	W.Connect(UserInputService.InputBegan, function(input, gp)
 		if W.Capturing or W.LastCaptured == input then return end
-		if not gp and W.ToggleKey and input.KeyCode == W.ToggleKey then
+		if not gp and KeyMatches(W.ToggleKey, input) then
 			W.Window.Toggle()
 		end
 	end)
@@ -4492,22 +5076,20 @@ local function CreateWindow(o)
 	Method(Window, "SetAccent", function(c, a) W.SetAccentExternal(c, a) end)
 	Method(Window, "GetAccent", function() return W.Accent, W.AccentAlpha end)
 	Method(Window, "SetScale", function(s, animate) W.SetScale(s, animate) end)
-	Method(Window, "GetScale", function() return W.Scale.Scale end)
+	Method(Window, "GetScale", function() return W.UserScale end)
 	Method(Window, "SetScrollbarSize", function(px) W.ScrollSlider.Set(px) end)
 	Method(Window, "SetMouseWheel", function(b)
 		W.WheelScroll = b == true
 		for _, p in ipairs(W.Pages) do p.scroll.ScrollingEnabled = W.WheelScroll end
 	end)
 
-	Method(Window, "SetVisible", function(b)
-		W.Holder.Visible = b ~= false
-		if not W.Holder.Visible then W.ClosePopup() end
-	end)
-	Method(Window, "Show", function() Window.SetVisible(true) end)
-	Method(Window, "Hide", function() Window.SetVisible(false) end)
-	Method(Window, "Toggle", function() Window.SetVisible(not W.Holder.Visible) end)
-	Method(Window, "IsVisible", function() return W.Holder.Visible end)
-	Method(Window, "SetToggleKey", function(k) W.ToggleKey = k end)
+	Method(Window, "SetVisible", function(b, instant) W.SetShown(b ~= false, instant) end)
+	Method(Window, "Show", function(instant) W.SetShown(true, instant) end)
+	Method(Window, "Hide", function(instant) W.SetShown(false, instant) end)
+	Method(Window, "Toggle", function(instant) W.SetShown(not W.Visible, instant) end)
+	Method(Window, "IsVisible", function() return W.Visible end)
+	Method(Window, "SetAnimation", function(b) W.Animate = b ~= false end)
+	Method(Window, "SetToggleKey", function(k) W.ToggleKey = ParseKey(k) end)
 	Method(Window, "GetToggleKey", function() return W.ToggleKey end)
 	Method(Window, "SetPosition", function(p) W.Holder.Position = p end)
 	Method(Window, "Center", function()
@@ -4613,6 +5195,13 @@ local function CreateWindow(o)
 	end
 	table.insert(ThemeHooks, W.ThemeHook)
 	if o.Configs then Window.EnableConfigs(type(o.Configs) == "table" and o.Configs or nil) end
+
+	if o.Visible == false then
+		W.SetShown(false, true)
+	else
+		W.Holder.Visible = false
+		W.SetShown(true)
+	end
 
 	Library.ActiveWindow = Window
 	return Window
