@@ -10,6 +10,13 @@ local Window = Library:CreateWindow({
 	ConfigFolder = "ZeninDemo",
 	Animation = true, -- open/close fade + scale animation (set false to disable)
 	Configs = true,
+	-- Floating list of keybinds. Tap/click a row to trigger it, which is how binds work on phones.
+	-- On touch-only devices, tapping a keybind's key button also triggers it (there are no keys to bind).
+	KeybindList = {
+		Visible = true,
+		ShowInactive = true,   -- false = only show binds that are currently on
+		-- Position = UDim2.fromOffset(8, 42),
+	},
 	Watermark = {
 		Title = "Zenin Demo",
 		Site = "zenin.gg",
@@ -176,6 +183,13 @@ Inputs:AddKeybind({
 	Default = Enum.UserInputType.MouseButton2,
 	Mode = "Hold",
 	Callback = function(held) print("Zoom held:", held) end,
+})
+
+Inputs:AddKeybind({
+	Name = "Hidden from list",
+	Flag = "SecretKey",
+	Default = Enum.KeyCode.K,
+	ShowInList = false,
 })
 
 Inputs:AddKeybind({
