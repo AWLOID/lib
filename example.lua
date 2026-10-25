@@ -19,19 +19,32 @@ local Window = Library:CreateWindow({
 	-- Shown before the menu; remove this block to disable it.
 	KeySystem = {
 		Title = "Zenin Demo",
-		Note = "Demo key: zenin-demo",
-		Keys = {"zenin-demo"},
-		-- Your own server-side check (optional). Return true to accept, or false plus a message.
+		Note = "Keys: zenin-demo (lifetime) or zenin-trial (2 min)",
+		Keys = {
+			"zenin-demo",                         -- never expires
+			["zenin-trial"] = os.time() + 120,    -- expires at this unix time
+		},
+		-- Duration = 3600, -- optional: every key expires this many seconds after it was entered
+
+		-- Your own server-side check (optional). Return true to accept (optionally with the unix
+		-- expiry time), or false plus a message. It is re-run every CheckInterval seconds, so
+		-- revoking or expiring a key on the server closes the menu within that time.
 		-- Verify = function(key, hwid, player)
 		-- 	local res = request({Url = "https://your.server/verify?key=" .. key .. "&hwid=" .. hwid, Method = "GET"})
-		-- 	return res.Body == "valid", "Invalid key"
+		-- 	local data = game:GetService("HttpService"):JSONDecode(res.Body)
+		-- 	return data.valid == true, data.valid and data.expires or data.message
 		-- end,
+		-- Or just a URL; the response can be "valid" or JSON {"valid": true, "expires": 1735689600}.
 		-- Url = "https://your.server/verify?key={key}&hwid={hwid}",
+		-- CheckInterval = 60,  -- seconds between live re-checks (default 60 with Url/Verify)
+
 		GetKeyLink = "https://example.com/get-key",
 		SaveKey = true,
 		MaxAttempts = 5,
 		Cooldown = 30,
-		OnSuccess = function(key) print("Key accepted:", key) end,
+		OnSuccess = function(key, info) print("Key accepted:", key, info.Expires and ("expires " .. os.date("%c", info.Expires)) or "lifetime") end,
+		-- When the key expires or is revoked, the menu closes and the key is asked again.
+		OnExpire = function(reason) print("Key expired:", reason) end,
 	},
 })
 
@@ -204,19 +217,11 @@ Colors:AddButton({
 })
 
 ------------------------------------------------------------------------
--- Tab 3: checkbox, segmented, range slider, stepper, progress bar
+-- Tab 3: segmented, range slider, stepper, progress bar
 ------------------------------------------------------------------------
 local Extra = Window:AddTab({Name = "Extra", Icon = "layers"})
 
 local Choices = Extra:AddSection({Name = "Choices", Side = "Left"})
-
-Choices:AddCheckbox({
-	Name = "Auto Farm",
-	Flag = "AutoFarm",
-	Default = false,
-	Callback = function(v) print("Auto Farm:", v) end,
-})
-Choices:AddCheckbox({Name = "Auto Sell", Flag = "AutoSell", Default = true})
 
 Choices:AddSegmented({
 	Name = "Quality",
@@ -325,6 +330,12 @@ Window2:AddButton({Name = "Hide for 2s (animated)", Callback = function()
 	Window:Hide()
 	task.delay(2, function() Window:Show() end)
 end})
+Window2:AddButton({Name = "Key Info", Callback = function()
+	local info = Window:GetKeyInfo()
+	if not info then return "No key system" end
+	Notify(info.Remaining and ("Key expires in " .. Library.FormatDuration(info.Remaining)) or "Lifetime key")
+end})
+Window2:AddButton({Name = "Expire Key Now", Callback = function() Window:ExpireKey("Key expired (demo)") end})
 Window2:AddButton({Name = "Unload", Callback = function() Library:Unload() end})
 
 ------------------------------------------------------------------------
