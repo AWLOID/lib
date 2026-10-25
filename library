@@ -1314,10 +1314,12 @@ local function AddCardButton(W, S, o)
 	return el
 end
 
-local function OpenColorModal(W, owner, anchor, color, alpha, onChange)
+local function OpenColorModal(W, owner, anchor, color, alpha, onChange, state)
 	local T = W.Theme
 	local h, s, v = color:ToHSV()
-	local a = 1 - (alpha or 1)
+	-- Gray/black colors carry no hue; reuse the last picked hue so it isn't reset to red.
+	if state and state.h and (s == 0 or v == 0) then h = state.h end
+	local a = math.clamp(1 - (tonumber(alpha) or 1), 0, 1)
 
 	local MW, MH = 208, 184
 	local SV, BW, BH = 144, 16, 144
@@ -1440,7 +1442,7 @@ local function OpenColorModal(W, owner, anchor, color, alpha, onChange)
 	end
 	Refresh()
 
-	local mode = nil
+	local mode, last = nil, nil
 	local function Process(inp)
 		if mode == "SV" then
 			s = math.clamp((inp.Position.X - svBox.AbsolutePosition.X) / svBox.AbsoluteSize.X, 0, 1)
@@ -1448,10 +1450,14 @@ local function OpenColorModal(W, owner, anchor, color, alpha, onChange)
 		elseif mode == "H" then
 			h = math.clamp((inp.Position.Y - hueBar.AbsolutePosition.Y) / hueBar.AbsoluteSize.Y, 0, 0.999)
 		elseif mode == "A" then
-			a = math.clamp((inp.Position.Y - alphaBar.AbsolutePosition.Y) / alphaBar.AbsoluteSize.Y, 0, 0.92)
+			a = math.clamp((inp.Position.Y - alphaBar.AbsolutePosition.Y) / alphaBar.AbsoluteSize.Y, 0, 1)
 		else
 			return
 		end
+		if state then state.h = h end
+		local key = h .. "," .. s .. "," .. v .. "," .. a
+		if key == last then return end
+		last = key
 		Refresh()
 		onChange(Color3.fromHSV(h, s, v), 1 - a)
 	end
@@ -1471,6 +1477,7 @@ end
 
 local function AccentPicker(W, S, labelText)
 	local el, row = NewElement(W, S, "AccentPicker", {}, 25)
+	local hueState = {}
 	local icon = CreateIcon(row, {"palette"}, 12, UDim2.new(0, -1.5, 0.5, -6))
 	local lbl = Label(row, labelText, {Position = UDim2.fromOffset(14, 0), Size = UDim2.new(0.7, -14, 1, 0)})
 	local circle = Create("TextButton", {
@@ -1491,7 +1498,7 @@ local function AccentPicker(W, S, labelText)
 	Method(el, "Set", function(c, a) W.SetAccent(c, a) end)
 	circle.MouseButton1Click:Connect(function()
 		if not W.PreparePopup(el, circle) then return end
-		OpenColorModal(W, el, circle, W.Accent, W.AccentAlpha, function(c, a) W.SetAccent(c, a) end)
+		OpenColorModal(W, el, circle, W.Accent, W.AccentAlpha, function(c, a) W.SetAccent(c, a) end, hueState)
 	end)
 	return el
 end
@@ -1501,11 +1508,16 @@ local function AddColorPicker(W, S, o)
 	o = Opts(o)
 	local el, row = NewElement(W, S, "ColorPicker", o, 21)
 	local def = o.Default or o.Value or o.Color or o.Colors or WHITE
-	local multi = typeof(def) ~= "Color3" and type(def) == "table"
+	local multi = type(def) == "table"
 	local list = multi and def or {def}
+	local function ToColor(c)
+		if typeof(c) == "Color3" then return c end
+		if type(c) == "string" then return FromHex(c) end
+		return nil
+	end
 	local colors, alphas = {}, {}
 	for i = 1, math.min(#list, MAX_COLORS) do
-		colors[i] = typeof(list[i]) == "Color3" and list[i] or WHITE
+		colors[i] = ToColor(list[i]) or WHITE
 		local al = o.Alpha
 		if type(al) == "table" then al = al[i] end
 		alphas[i] = math.clamp(tonumber(al) or 1, 0, 1)
@@ -1528,7 +1540,7 @@ local function AddColorPicker(W, S, o)
 			Parent = row,
 		})
 		Corner(c, CS / 2)
-		circles[i] = {btn = c, el = el, index = i}
+		circles[i] = {btn = c, el = el, index = i, stroke = Stroke(c, WHITE, 1)}
 	end
 
 	local function Value()
@@ -1547,6 +1559,7 @@ local function AddColorPicker(W, S, o)
 		for i, c in ipairs(circles) do
 			c.btn.BackgroundColor3 = colors[i]
 			c.btn.BackgroundTransparency = 1 - alphas[i] * (enabled and 1 or 0.45)
+			c.stroke.Color = T.BoxBorder
 		end
 	end
 	W.Bind(function() el._apply() end, row)
@@ -1567,25 +1580,29 @@ local function AddColorPicker(W, S, o)
 			OpenColorModal(W, c, c.btn, colors[i], alphas[i], function(col, a)
 				colors[i], alphas[i] = col, a
 				Changed(false)
-			end)
+			end, c)
 		end)
 	end
 
 	Method(el, "Set", function(v, a, silent)
-		if typeof(v) == "Color3" then v = {v} end
-		if type(v) ~= "table" then return end
+		if type(v) ~= "table" then v = {v} end
 		for i = 1, n do
-			if typeof(v[i]) == "Color3" then colors[i] = v[i] end
-			local ai = type(a) == "table" and a[i] or a
+			local col = ToColor(v[i])
+			if col then colors[i] = col end
+			local ai
+			if type(a) == "table" then ai = a[i] else ai = a end
 			if tonumber(ai) then alphas[i] = math.clamp(tonumber(ai), 0, 1) end
 		end
 		W.ClosePopupOf(el)
 		Changed(silent)
 	end)
 	Method(el, "SetColor", function(i, col, a, silent)
+		i = tonumber(i) or 1
 		if not colors[i] then return end
-		if typeof(col) == "Color3" then colors[i] = col end
+		col = ToColor(col)
+		if col then colors[i] = col end
 		if tonumber(a) then alphas[i] = math.clamp(tonumber(a), 0, 1) end
+		W.ClosePopupOf(circles[i])
 		Changed(silent)
 	end)
 	Method(el, "Get", Value)
@@ -3372,9 +3389,6 @@ local function BuildConfigs(W, Window)
 		local ok, err = Configs.Save(name)
 		if ok then box.Text = "" end
 		Result(ok, err, "Created " .. name .. ".cfg", "Create failed")
-	end)
-	WideButton(actions._raw(27), "Refresh List", {"refresh-cw"}, function()
-		Refresh()
 	end)
 
 	Refresh()
