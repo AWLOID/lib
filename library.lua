@@ -2002,7 +2002,7 @@ local function AddKeybind(W, S, o)
 			end
 			return
 		end
-		if gp or not el.Enabled or not KeyMatches(key, input) then return end
+		if W.KeyLocked or gp or not el.Enabled or not KeyMatches(key, input) then return end
 		if W.Capturing or W.LastCaptured == input then return end
 		if mode == "Toggle" then
 			SetActive(not active)
@@ -2014,6 +2014,7 @@ local function AddKeybind(W, S, o)
 	end))
 	table.insert(conns, W.Connect(UserInputService.InputEnded, function(input)
 		if not row.Parent or mode ~= "Hold" or not active then return end
+		if W.KeyLocked then SetActive(false) return end
 		if KeyMatches(key, input) then SetActive(false) end
 	end))
 
@@ -2155,70 +2156,6 @@ end
 
 local EL_TI = TweenInfo.new(0.14, Enum.EasingStyle.Quad)
 local MOVE_TI = TweenInfo.new(0.2, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
-
-local function AddCheckbox(W, S, o)
-	o = Opts(o)
-	local el, row = NewElement(W, S, "Checkbox", o, 21)
-	local state = (o.Default or o.Value) == true
-	el.Value = state
-
-	local click = Create("TextButton", {Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "", Parent = row})
-	local box = Create("TextButton", {
-		Size = UDim2.fromOffset(14, 14),
-		Position = UDim2.new(0, 0, 0.5, -7),
-		BorderSizePixel = 0,
-		Text = "",
-		AutoButtonColor = false,
-		ZIndex = 2,
-		Parent = row,
-	})
-	Corner(box, 3)
-	local bs = Stroke(box, WHITE, 1)
-	local check = CreateIcon(box, {"check"}, 10, UDim2.new(0.5, -5, 0.5, -5))
-	check.ZIndex = 3
-	local lbl = Label(row, o.Name or o.Title or "Checkbox", {Position = UDim2.fromOffset(22, 0), Size = UDim2.new(1, -22, 1, 0), Truncate = true})
-	local hover = false
-
-	function el._apply(animate)
-		local T, enabled = W.Theme, el.Enabled
-		local a = W.AccentAlpha * (enabled and 1 or 0.45)
-		local bg = state and W.Accent or (enabled and T.ToggleOffBg or T.ToggleOffBgOff)
-		local bgT = state and (1 - a) or 0
-		local iT = state and 0 or 1
-		if animate then
-			Tween(box, EL_TI, {BackgroundColor3 = bg, BackgroundTransparency = bgT})
-			Tween(check, EL_TI, {ImageTransparency = iT})
-		else
-			StopTweens(box, check)
-			box.BackgroundColor3, box.BackgroundTransparency = bg, bgT
-			check.ImageTransparency = iT
-		end
-		check.ImageColor3 = OnAccent(W)
-		bs.Color = state and W.Accent or (enabled and T.DropdownBorder or T.DropdownBorderOff)
-		bs.Transparency = state and (1 - a) or 0
-		lbl.TextColor3 = not enabled and T.TextDim or ((state or hover) and T.Text or T.TextGray)
-	end
-	W.Bind(function() el._apply(false) end, row)
-
-	Method(el, "Set", function(v, silent)
-		v = v and true or false
-		local changed = v ~= state
-		state = v
-		el.Value = v
-		el._apply(true)
-		if changed and not silent then el._fire(v) else el._sync(v) end
-	end)
-	Method(el, "Get", function() return state end)
-	Method(el, "Toggle", function() el.Set(not state) end)
-	Method(el, "SetName", function(t) lbl.Text = tostring(t) end)
-
-	local function OnClick() if el.Enabled then el.Set(not state) end end
-	click.MouseButton1Click:Connect(OnClick)
-	box.MouseButton1Click:Connect(OnClick)
-	click.MouseEnter:Connect(function() hover = true el._apply(false) end)
-	click.MouseLeave:Connect(function() hover = false el._apply(false) end)
-	return Finish(el, o)
-end
 
 local function AddSegmented(W, S, o)
 	o = Opts(o)
@@ -2656,7 +2593,7 @@ end
 
 local ELEMENT_KINDS = {
 	"Toggle", "Slider", "Dropdown", "MultiDropdown", "Button", "CardButton", "ColorPicker", "Input", "Keybind",
-	"Label", "Paragraph", "Divider", "Checkbox", "Segmented", "ProgressBar", "RangeSlider", "Stepper",
+	"Label", "Paragraph", "Divider", "Segmented", "ProgressBar", "RangeSlider", "Stepper",
 }
 
 function ElementApi(W, S)
@@ -2672,12 +2609,11 @@ function ElementApi(W, S)
 	Method(S, "AddParagraph", function(x) return AddParagraph(W, S, x) end)
 	Method(S, "AddDivider", function(x) return AddDivider(W, S, x) end)
 	S.AddTextbox, S.AddTextBox = S.AddInput, S.AddInput
-	Method(S, "AddCheckbox", function(x) return AddCheckbox(W, S, x) end)
 	Method(S, "AddSegmented", function(x) return AddSegmented(W, S, x) end)
 	Method(S, "AddProgressBar", function(x) return AddProgressBar(W, S, x) end)
 	Method(S, "AddRangeSlider", function(x) return AddRangeSlider(W, S, x) end)
 	Method(S, "AddStepper", function(x) return AddStepper(W, S, x) end)
-	S.AddCheckBox, S.AddProgress, S.AddNumber = S.AddCheckbox, S.AddProgressBar, S.AddStepper
+	S.AddProgress, S.AddNumber = S.AddProgressBar, S.AddStepper
 	Method(S, "AddButton", function(x)
 		x = Opts(x)
 		if x.Icon or x.Description or x.Desc or x.ButtonText then return AddCardButton(W, S, x) end
@@ -4412,69 +4348,114 @@ local function BodyIsValid(body)
 	if low == "true" or low == "valid" or low == "ok" or low == "1" or low == "success" then return true end
 	local ok, data = pcall(function() return HttpService:JSONDecode(trimmed) end)
 	if ok and type(data) == "table" then
-		if data.valid == true or data.success == true or data.Valid == true or data.Success == true then return true end
+		local exp = data.expires or data.expiresAt or data.expires_at or data.expiry or data.expire or data.Expires
+		if data.valid == true or data.success == true or data.Valid == true or data.Success == true then return true, nil, exp end
 		return false, data.message or data.Message or data.error
 	end
 	return false
 end
 
--- Blocks the calling thread until a key passes verification. Returns true, or false if the user closes it.
-local function RunKeySystem(ks, ctx)
-	if type(ks) ~= "table" then ks = {} end
-	if ks.Enabled == false then return true end
-	ctx = ctx or {}
-	local theme = Library.Themes[ctx.Theme or ""] or Library.Themes.Dark
-	local K = {
-		Theme = theme,
-		Accent = ToColor(ctx.Accent) or rgb(255, 89, 89),
-		AccentAlpha = ToAlpha(ctx.AccentAlpha) or 1,
-	}
-	function K.Bind(fn) fn(K.Theme, K.Accent, K.AccentAlpha) end
+local function Now() return os.time() end
 
+-- Unix seconds; millisecond timestamps are converted.
+local function ParseExpiry(v)
+	v = tonumber(v)
+	if not v or v ~= v or v <= 0 then return nil end
+	if v > 1e12 then v = v / 1000 end
+	return math.floor(v)
+end
+
+local function FormatDuration(sec)
+	sec = math.max(0, math.floor(tonumber(sec) or 0))
+	local d = math.floor(sec / 86400)
+	local h = math.floor(sec % 86400 / 3600)
+	local m = math.floor(sec % 3600 / 60)
+	local s = sec % 60
+	if d > 0 then return ("%dd %dh"):format(d, h) end
+	if h > 0 then return ("%dh %02dm"):format(h, m) end
+	if m > 0 then return ("%dm %02ds"):format(m, s) end
+	return ("%ds"):format(s)
+end
+
+-- Verification + saved-key storage, shared by the first prompt and later re-checks.
+local function KeyBackend(ks, ctx)
+	local B = {}
 	local staticKeys = {}
 	local keyList = ks.Keys or ks.Key
 	if type(keyList) == "string" then keyList = {keyList} end
-	for _, k in ipairs(type(keyList) == "table" and keyList or {}) do staticKeys[tostring(k)] = true end
+	-- Keys = {"a", "b"} never expire; Keys = {["a"] = unixExpiry} expire at that time.
+	for k, v in pairs(type(keyList) == "table" and keyList or {}) do
+		if type(k) == "number" then
+			staticKeys[tostring(v)] = true
+		else
+			staticKeys[tostring(k)] = v
+		end
+	end
 	local hwid = GetHwid()
+	B.Hwid = hwid
+	local hasRemote = (type(ks.Url) == "string" and ks.Url ~= "") or type(ks.Verify) == "function"
 
+	-- Returns valid, message, expires, definitive (false when the server simply couldn't be reached).
 	local function Check(key)
-		if key == "" then return false, "Enter a key" end
-		if staticKeys[key] then return true end
-		local lastMsg
+		if key == "" then return false, "Enter a key", nil, true end
+		local st = staticKeys[key]
+		if st ~= nil and st ~= false then
+			if st == true then return true end
+			return true, nil, ParseExpiry(st)
+		end
+		local lastMsg, reached = nil, not hasRemote
 		if type(ks.Url) == "string" and ks.Url ~= "" then
 			local url = ks.Url:gsub("{key}", function() return HttpService:UrlEncode(key) end)
 				:gsub("{hwid}", function() return HttpService:UrlEncode(hwid) end)
 			local body, code = HttpGetBody(url)
 			if body then
-				local ok, msg
+				reached = true
+				local ok, msg, exp
 				if type(ks.Validate) == "function" then
-					ok, msg = ks.Validate(body, key, code)
+					ok, msg, exp = ks.Validate(body, key, code)
 				else
-					ok, msg = BodyIsValid(body)
+					ok, msg, exp = BodyIsValid(body)
 				end
-				if ok == true then return true end
-				lastMsg = msg
+				if ok == true then
+					if type(msg) == "number" then exp = msg end
+					return true, nil, ParseExpiry(exp)
+				end
+				lastMsg = type(msg) == "string" and msg or nil
 			else
 				lastMsg = "Could not reach key server"
 			end
 		end
 		if type(ks.Verify) == "function" then
-			local ok, msg = ks.Verify(key, hwid, LocalPlayer)
-			if ok == true then return true end
-			lastMsg = msg or lastMsg
+			reached = true
+			local ok, a, b = ks.Verify(key, hwid, LocalPlayer)
+			if ok == true then
+				local exp = b
+				if type(a) == "number" then exp = a end
+				if type(a) == "table" then exp = a.Expires or a.expires end
+				return true, nil, ParseExpiry(exp)
+			end
+			if type(a) == "string" then lastMsg = a end
 		end
-		return false, lastMsg or "Invalid key"
+		return false, lastMsg or "Invalid key", nil, reached
 	end
-	local function SafeCheck(key)
-		local ok, valid, msg = pcall(Check, key)
-		if not ok then return false, "Verification error" end
-		return valid == true, msg
+
+	function B.Check(key, activated)
+		local ok, valid, msg, exp, definitive = pcall(Check, tostring(key or ""))
+		if not ok then return false, "Verification error", nil, false end
+		if not valid then return false, msg, nil, definitive end
+		local dur = tonumber(ks.Duration)
+		if dur and dur > 0 then
+			local local_exp = math.floor((tonumber(activated) or Now()) + dur)
+			exp = exp and math.min(exp, local_exp) or local_exp
+		end
+		if exp and exp <= Now() then return false, "Key expired", nil, true end
+		return true, nil, exp, true
 	end
 
 	local folder = ks.Folder or ctx.Folder
 	local fileName = ks.FileName or ((ctx.GuiName or Library.GuiName) .. "_key.txt")
 	local savePath = (folder and folder ~= "") and (folder .. "/" .. fileName) or fileName
-	local function SaveKey(key)
+	function B.Save(key, activated)
 		if ks.SaveKey == false or not writefile then return end
 		if folder and folder ~= "" and isfolder and makefolder then
 			local cur = ""
@@ -4484,19 +4465,39 @@ local function RunKeySystem(ks, ctx)
 				if not (ok and exists) then pcall(makefolder, cur) end
 			end
 		end
-		pcall(writefile, savePath, key)
+		pcall(writefile, savePath, tostring(key) .. "\n" .. tostring(math.floor(tonumber(activated) or Now())))
 	end
-	local function LoadKey()
+	function B.Load()
 		if ks.SaveKey == false or not (isfile and readfile) then return nil end
 		local ok, exists = pcall(isfile, savePath)
 		if not (ok and exists) then return nil end
 		local ok2, data = pcall(readfile, savePath)
-		if ok2 and type(data) == "string" and data ~= "" then return data end
-		return nil
+		if not (ok2 and type(data) == "string") then return nil end
+		local key, activated = data:match("^([^\n]*)\n?(%d*)")
+		if not key or key == "" then return nil end
+		return key, tonumber(activated)
 	end
-	local function ForgetKey()
+	function B.Forget()
 		if delfile then pcall(delfile, savePath) end
 	end
+	return B
+end
+
+-- Blocks the calling thread until a key passes verification.
+-- Returns true, {Key, Expires, Activated}, or false if the user closes it.
+local function RunKeySystem(ks, ctx)
+	if type(ks) ~= "table" then ks = {} end
+	if ks.Enabled == false then return true, {} end
+	ctx = ctx or {}
+	local theme = Library.Themes[ctx.Theme or ""] or Library.Themes.Dark
+	local K = {
+		Theme = theme,
+		Accent = ToColor(ctx.Accent) or rgb(255, 89, 89),
+		AccentAlpha = ToAlpha(ctx.AccentAlpha) or 1,
+	}
+	function K.Bind(fn) fn(K.Theme, K.Accent, K.AccentAlpha) end
+
+	local B = ctx.Backend or KeyBackend(ks, ctx)
 
 	local parent = ctx.Parent
 	if not parent then
@@ -4514,6 +4515,7 @@ local function RunKeySystem(ks, ctx)
 		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 		Parent = parent,
 	})
+	if ctx.OnGui then SafeCall(ctx.OnGui, gui) end
 
 	local T, KW, KH = theme, 300, 186
 	local holder = Create("Frame", {
@@ -4670,16 +4672,16 @@ local function RunKeySystem(ks, ctx)
 	local maxAttempts = tonumber(ks.MaxAttempts)
 	local lockTime = tonumber(ks.Cooldown) or 30
 
-	local function Finish(result, key)
+	local function Finish(result, info)
 		if finished then return end
 		finished = true
 		Tween(holder, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {Position = UDim2.new(0.5, 0, 0.5, 12)})
 		task.delay(0.12, function() gui:Destroy() end)
-		if result then SafeCall(ks.OnSuccess or ks.Callback, key) else SafeCall(ks.OnClose) end
-		task.spawn(thread, result)
+		if result then SafeCall(ks.OnSuccess or ks.Callback, info.Key, info) else SafeCall(ks.OnClose) end
+		task.spawn(thread, result, info)
 	end
 
-	local function Attempt(key, fromSave)
+	local function Attempt(key, fromSave, activated)
 		if busy or finished then return end
 		key = tostring(key or ""):gsub("^%s+", ""):gsub("%s+$", "")
 		local now = os.clock()
@@ -4691,21 +4693,27 @@ local function RunKeySystem(ks, ctx)
 		setVerifyDisabled(true)
 		verifyLbl.Text = "Checking..."
 		Status(fromSave and "Checking saved key..." or "Verifying...")
+		activated = math.floor(tonumber(activated) or Now())
 		task.spawn(function()
-			local valid, msg = SafeCheck(key)
+			local valid, msg, exp, definitive = B.Check(key, activated)
 			busy = false
 			if finished or not gui.Parent then return end
 			setVerifyDisabled(false)
 			verifyLbl.Text = ks.VerifyText or "Verify"
 			if valid then
-				Status("Key accepted", "ok")
-				SaveKey(key)
-				task.delay(0.35, function() Finish(true, key) end)
+				Status(exp and ("Key accepted · expires in " .. FormatDuration(exp - Now())) or "Key accepted", "ok")
+				B.Save(key, activated)
+				task.delay(0.35, function() Finish(true, {Key = key, Expires = exp, Activated = activated}) end)
 				return
 			end
 			if fromSave then
-				ForgetKey()
-				Status("Saved key expired. Enter a new key", "error")
+				if definitive then
+					B.Forget()
+					box.Text = ""
+					Status(msg == "Key expired" and "Saved key expired. Enter a new key" or "Saved key is no longer valid", "error")
+				else
+					Status(msg or "Could not verify saved key", "error")
+				end
 				return
 			end
 			attempts = attempts + 1
@@ -4740,10 +4748,12 @@ local function RunKeySystem(ks, ctx)
 	holder.Position = UDim2.new(0.5, 0, 0.5, 12)
 	Tween(holder, TweenInfo.new(0.25, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {Position = UDim2.fromScale(0.5, 0.5)})
 
-	local saved = LoadKey()
+	if ctx.Reason then Status(ctx.Reason, "error") end
+	local saved, savedAt
+	if not ctx.SkipSaved then saved, savedAt = B.Load() end
 	if saved then
 		box.Text = saved
-		Attempt(saved, true)
+		Attempt(saved, true, savedAt)
 	end
 	return coroutine.yield()
 end
@@ -4752,13 +4762,18 @@ local function CreateWindow(o)
 	o = Opts(o)
 	if o.Name and not o.Title then o.Title = o.Name end
 	-- Runs before any window or API exists, so nothing below is reachable until a key passes.
+	local keyCfg, keyCtx, keyInfo
 	if o.KeySystem and o.KeySystem ~= false then
-		local ok = RunKeySystem(o.KeySystem == true and {} or o.KeySystem, {
+		keyCfg = o.KeySystem == true and {} or o.KeySystem
+		keyCtx = {
 			Theme = o.Theme, Accent = o.Accent, AccentAlpha = o.AccentAlpha,
 			Title = o.Title, Logo = o.Logo or o.Icon, Parent = o.Parent, GuiName = o.GuiName,
 			DisplayOrder = o.DisplayOrder, Folder = o.ConfigFolder or Library.ConfigFolder,
-		})
+		}
+		if keyCfg.Enabled ~= false then keyCtx.Backend = KeyBackend(keyCfg, keyCtx) end
+		local ok, info = RunKeySystem(keyCfg, keyCtx)
 		if not ok then error("[Zenin] key verification was not completed", 0) end
+		keyInfo = info
 	end
 	if Library.ActiveWindow then pcall(Library.ActiveWindow.Destroy) end
 
@@ -4999,6 +5014,7 @@ local function CreateWindow(o)
 	function W.SetShown(show, instant)
 		if not W.Alive then return end
 		show = show ~= false
+		if show and W.KeyLocked then return end
 		W.Visible = show
 		animToken = animToken + 1
 		local token = animToken
@@ -5166,6 +5182,7 @@ local function CreateWindow(o)
 	Method(Window, "Destroy", function()
 		if not W.Alive then return end
 		W.Alive = false
+		if W.KeyGui then pcall(function() W.KeyGui:Destroy() end) end
 		W.ClosePopup()
 		W.CancelDrag()
 		for _, p in ipairs(W.Pages) do p.StopScroll() end
@@ -5196,6 +5213,130 @@ local function CreateWindow(o)
 	table.insert(ThemeHooks, W.ThemeHook)
 	if o.Configs then Window.EnableConfigs(type(o.Configs) == "table" and o.Configs or nil) end
 
+	local KS = keyInfo and keyInfo.Key and {Key = keyInfo.Key, Expires = keyInfo.Expires, Activated = keyInfo.Activated, Valid = true}
+	local expireHooks = {}
+	Method(Window, "IsKeyValid", function() return KS == nil or KS.Valid end)
+	Method(Window, "GetKeyInfo", function()
+		if not KS then return nil end
+		return {
+			Key = KS.Key, Valid = KS.Valid, Expires = KS.Expires,
+			Remaining = KS.Expires and math.max(0, KS.Expires - Now()) or nil,
+		}
+	end)
+	Method(Window, "OnKeyExpired", function(fn) table.insert(expireHooks, fn) end)
+	Method(Window, "CheckKey", function() end)
+	Method(Window, "ExpireKey", function() end)
+	if KS then
+		local backend = keyCtx.Backend
+		local interval = keyCfg.CheckInterval
+		if interval == nil then interval = (keyCfg.Url or keyCfg.Verify) and 60 or false end
+		interval = interval and math.max(tonumber(interval) or 60, 5)
+		local lastCheck, checking, warned = os.clock(), false, {}
+		local WARN_AT = {300, 60}
+
+		-- Locks the menu and asks for a new key; closing that prompt unloads the window.
+		local function Expire(reason)
+			if not W.Alive or not KS.Valid then return end
+			KS.Valid = false
+			W.KeyLocked = true
+			reason = reason or "Your key has expired"
+			backend.Forget()
+			SafeCall(keyCfg.OnExpire, reason)
+			for _, fn in ipairs(expireHooks) do SafeCall(fn, reason) end
+			W.SetShown(false)
+			task.spawn(function()
+				local ctx2 = setmetatable({
+					Reason = reason,
+					SkipSaved = true,
+					Theme = W.ThemeName, Accent = W.Accent, AccentAlpha = W.AccentAlpha,
+					OnGui = function(g) W.KeyGui = g end,
+				}, {__index = keyCtx})
+				local ok, info = RunKeySystem(keyCfg, ctx2)
+				W.KeyGui = nil
+				if not W.Alive then return end
+				if not ok then
+					Window.Destroy()
+					return
+				end
+				KS.Key, KS.Expires, KS.Activated, KS.Valid = info.Key, info.Expires, info.Activated, true
+				table.clear(warned)
+				lastCheck = os.clock()
+				W.KeyLocked = false
+				W.SetShown(true)
+				Window.Notify({Title = "Key", Content = "Key accepted", Icon = {"key-round", "key"}})
+			end)
+		end
+		local function Recheck()
+			if checking or not KS.Valid then return end
+			checking = true
+			local key = KS.Key
+			task.spawn(function()
+				local valid, msg, exp, definitive = backend.Check(key, KS.Activated)
+				checking = false
+				lastCheck = os.clock()
+				if not W.Alive or not KS.Valid or KS.Key ~= key then return end
+				if valid then
+					KS.Expires = exp
+				elseif definitive or keyCfg.StrictOnline then
+					Expire(msg == "Key expired" and "Your key has expired" or (msg or "Your key is no longer valid"))
+				end
+			end)
+		end
+		Method(Window, "CheckKey", Recheck)
+		Method(Window, "ExpireKey", function(reason) Expire(reason) end)
+
+		local keyLbl
+		if keyCfg.ShowInSettings ~= false then
+			local keySec = settingsApi.AddSection({Name = "Key", Side = "Right"})
+			keyLbl = keySec.AddLabel("")
+			keySec.AddButton({Name = "Check Key Now", Callback = function()
+				Recheck()
+				return "Checking..."
+			end})
+		end
+		local function UpdateLabel()
+			if not keyLbl then return end
+			local k = tostring(KS.Key)
+			local masked = (#k > 6 and k:sub(1, 4) or "") .. "••••"
+			local state
+			if not KS.Valid then
+				state = "Expired"
+			elseif KS.Expires then
+				state = "Expires in " .. FormatDuration(KS.Expires - Now())
+			else
+				state = "Never expires"
+			end
+			keyLbl.Set("Key: " .. masked .. "   ·   " .. state)
+		end
+
+		task.spawn(function()
+			while W.Alive do
+				if KS.Valid then
+					local left = KS.Expires and (KS.Expires - Now())
+					if left and left <= 0 then
+						Expire("Your key has expired")
+					else
+						if left and keyCfg.Warn ~= false then
+							local due = false
+							for _, mark in ipairs(WARN_AT) do
+								if left <= mark and not warned[mark] then
+									warned[mark] = true
+									due = true
+								end
+							end
+							if due then
+								Window.Notify({Title = "Key", Content = "Your key expires in " .. FormatDuration(left), Icon = {"key-round", "key"}, Duration = 5})
+							end
+						end
+						if interval and os.clock() - lastCheck >= interval then Recheck() end
+					end
+				end
+				UpdateLabel()
+				task.wait(1)
+			end
+		end)
+	end
+
 	if o.Visible == false then
 		W.SetShown(false, true)
 	else
@@ -5209,6 +5350,7 @@ end
 
 Method(Library, "CreateWindow", CreateWindow)
 Method(Library, "KeySystem", function(ks) return RunKeySystem(ks, {}) end)
+Library.FormatDuration = FormatDuration
 Library.Window = Library.CreateWindow
 Library.new = Library.CreateWindow
 Method(Library, "Notify", function(o)
