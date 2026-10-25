@@ -8,6 +8,7 @@ local Window = Library:CreateWindow({
 	Accent = Color3.fromRGB(255, 89, 89),
 	ToggleKey = Enum.KeyCode.RightShift,
 	ConfigFolder = "ZeninDemo",
+	Animation = true, -- open/close fade + scale animation (set false to disable)
 	Configs = true,
 	Watermark = {
 		Title = "Zenin Demo",
@@ -203,7 +204,79 @@ Colors:AddButton({
 })
 
 ------------------------------------------------------------------------
--- Tab 3: sub-tabs, text and card buttons
+-- Tab 3: checkbox, segmented, range slider, stepper, progress bar
+------------------------------------------------------------------------
+local Extra = Window:AddTab({Name = "Extra", Icon = "layers"})
+
+local Choices = Extra:AddSection({Name = "Choices", Side = "Left"})
+
+Choices:AddCheckbox({
+	Name = "Auto Farm",
+	Flag = "AutoFarm",
+	Default = false,
+	Callback = function(v) print("Auto Farm:", v) end,
+})
+Choices:AddCheckbox({Name = "Auto Sell", Flag = "AutoSell", Default = true})
+
+Choices:AddSegmented({
+	Name = "Quality",
+	Flag = "Quality",
+	Options = {"Low", "Medium", "High"},
+	Default = "Medium",
+	Callback = function(v) print("Quality:", v) end,
+})
+
+Choices:AddSegmented({
+	Flag = "Side",
+	Options = {"Left", "Right"},
+	Default = "Left",
+})
+
+local Numbers = Extra:AddSection({Name = "Numbers", Side = "Right"})
+
+Numbers:AddRangeSlider({
+	Name = "FOV Range",
+	Flag = "FovRange",
+	Min = 30, Max = 120, Default = {60, 90}, Step = 1,
+	Suffix = "°",
+	Callback = function(v) print("FOV range:", v[1], v[2]) end,
+})
+
+Numbers:AddStepper({
+	Name = "Amount",
+	Flag = "Amount",
+	Min = 1, Max = 99, Default = 5, Step = 1,
+	Callback = function(v) print("Amount:", v) end,
+})
+
+Numbers:AddStepper({
+	Name = "Delay",
+	Flag = "Delay",
+	Min = 0, Max = 5, Default = 0.5, Step = 0.1,
+	Suffix = "s",
+})
+
+local Progress = Numbers:AddProgressBar({Name = "Task Progress", Max = 100, Default = 0})
+local Xp = Numbers:AddProgressBar({Name = "XP", Max = 1500, Default = 900, ShowValue = true})
+
+Numbers:AddButton({
+	Name = "Run Task",
+	Callback = function()
+		Progress:Set(0, true)
+		task.spawn(function()
+			for i = 1, 10 do
+				task.wait(0.15)
+				Progress:Set(i * 10)
+			end
+			Xp:Increment(100)
+			Notify("Task finished")
+		end)
+		return "Running..."
+	end,
+})
+
+------------------------------------------------------------------------
+-- Tab 4: sub-tabs, text and card buttons
 ------------------------------------------------------------------------
 local Info = Window:AddTab({Name = "Info", Icon = "info"})
 local About = Info:AddSubTab({Name = "About", Icon = "book-open"})
@@ -247,6 +320,10 @@ Window2:AddButton({Name = "Light Theme", Callback = function() Window:SetTheme("
 Window2:AddButton({Name = "Dark Theme", Callback = function() Window:SetTheme("Dark") end})
 Window2:AddButton({Name = "Random Accent", Callback = function()
 	Window:SetAccent(Color3.fromHSV(math.random(), 0.65, 1), 1)
+end})
+Window2:AddButton({Name = "Hide for 2s (animated)", Callback = function()
+	Window:Hide()
+	task.delay(2, function() Window:Show() end)
 end})
 Window2:AddButton({Name = "Unload", Callback = function() Library:Unload() end})
 
