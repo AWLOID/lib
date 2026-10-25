@@ -601,7 +601,7 @@ local function NewElement(W, S, kind, o, height)
 	Method(el, "SetEnabled", function(b)
 		el.Enabled = b ~= false
 		if not el.Enabled then W.ClosePopupOf(el) end
-		el._apply(true)
+		el._apply(false)
 	end)
 	Method(el, "IsEnabled", function() return el.Enabled end)
 	Method(el, "SetVisible", function(b)
@@ -703,15 +703,15 @@ local function AttachSettings(W, el, place)
 		local isz = size >= 20 and 12 or 10
 		local gi = CreateIcon(gear, {"settings", "cog"}, isz, UDim2.new(0.5, -isz / 2, 0.5, -isz / 2))
 		local open, hover = false, false
-		local function PaintGear(animate)
+		local function PaintGear()
 			local T = W.Theme
-			Anim(gear, {BackgroundColor3 = (hover and not open) and T.TileHover or T.DropdownBg}, animate)
-			Anim(gs, {Color = open and W.Accent or T.DropdownBorder, Transparency = open and (1 - W.AccentAlpha) or 0}, animate)
-			Anim(gi, {ImageColor3 = (open or hover) and T.Text or T.NavGray, Rotation = open and 90 or 0}, animate, MOVE_TI)
+			gear.BackgroundColor3 = T.DropdownBg
+			gs.Color = T.DropdownBorder
+			gi.ImageColor3 = (open or hover) and T.Text or T.NavGray
 		end
-		W.Bind(function() PaintGear(false) end, gear)
-		gear.MouseEnter:Connect(function() hover = true PaintGear(true) end)
-		gear.MouseLeave:Connect(function() hover = false PaintGear(true) end)
+		W.Bind(PaintGear, gear)
+		gear.MouseEnter:Connect(function() hover = true PaintGear() end)
+		gear.MouseLeave:Connect(function() hover = false PaintGear() end)
 
 		local frame = Create("Frame", {
 			Size = UDim2.fromOffset(PANEL_W, 26),
@@ -790,10 +790,10 @@ local function AttachSettings(W, el, place)
 			frame.Size = UDim2.fromOffset(PANEL_W, 26)
 			W.PushPopup(frame, owner, {Keep = true, OnClose = function()
 				open = false
-				PaintGear(true)
+				PaintGear()
 			end})
 			open = true
-			PaintGear(true)
+			PaintGear()
 			Tween(frame, TweenInfo.new(0.18, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {Size = UDim2.fromOffset(PANEL_W, Height())})
 		end)
 		Method(P, "Close", function() W.ClosePopupOf(owner) end)
@@ -819,7 +819,7 @@ local function AttachSettings(W, el, place)
 	end)
 end
 
-local function OpenList(W, owner, btn, options, isSelected, onPick, multi, onClose)
+local function OpenList(W, owner, btn, options, isSelected, onPick, multi)
 	if not W.PreparePopup(owner, btn) then return end
 	local T = W.Theme
 	local sc = W.Scale.Scale
@@ -885,12 +885,6 @@ local function OpenList(W, owner, btn, options, isSelected, onPick, multi, onClo
 		local it = {opt = opt, btn = ob}
 		table.insert(items, it)
 		Paint(it)
-		ob.BackgroundColor3 = T.PopupHover
-		ob.MouseEnter:Connect(function()
-			ob.BackgroundColor3 = W.Theme.PopupHover
-			Anim(ob, {BackgroundTransparency = 0}, true)
-		end)
-		ob.MouseLeave:Connect(function() Anim(ob, {BackgroundTransparency = 1}, true) end)
 		ob.MouseButton1Click:Connect(function()
 			onPick(opt)
 			if multi then
@@ -908,8 +902,8 @@ local function OpenList(W, owner, btn, options, isSelected, onPick, multi, onClo
 		if empty then empty.TextColor3 = th.TextDim end
 		for _, x in ipairs(items) do Paint(x) end
 	end, popup)
-	W.PushPopup(popup, owner, {OnClose = onClose})
-	Tween(popup, TweenInfo.new(0.18, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {Size = UDim2.fromOffset(w, totalH)})
+	W.PushPopup(popup, owner)
+	Tween(popup, TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = UDim2.fromOffset(w, totalH)})
 end
 
 local function AddToggle(W, S, o)
@@ -1039,22 +1033,15 @@ local function AddSlider(W, S, o)
 	local R = 5.5
 	local fill = Create("Frame", {BorderSizePixel = 0, Parent = track})
 	Corner(fill, 2)
-	local knob = Create("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.fromOffset(7, 7), BorderSizePixel = 0, ZIndex = 3, Parent = track})
-	Create("UICorner", {CornerRadius = UDim.new(1, 0), Parent = knob})
+	local knob = Create("Frame", {Size = UDim2.fromOffset(7, 7), BorderSizePixel = 0, ZIndex = 3, Parent = track})
+	Corner(knob, 4)
 	local ks = Stroke(knob, WHITE, 2)
-	local slHover, slDrag = false, false
-	local function KnobFx()
-		local big = (slHover or slDrag) and el.Enabled
-		Anim(knob, {Size = big and UDim2.fromOffset(9, 9) or UDim2.fromOffset(7, 7)}, true, MOVE_TI)
-	end
-	hit.MouseEnter:Connect(function() slHover = true KnobFx() end)
-	hit.MouseLeave:Connect(function() slHover = false KnobFx() end)
 
 	local SLIDE = TweenInfo.new(0.12, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
 	local function Layout(animate)
 		local p = (value - minV) / (maxV - minV)
 		local fs = UDim2.new(p, R * (1 - 2 * p), 1, 0)
-		local kp = UDim2.new(p, R * (1 - 2 * p), 0.5, 0)
+		local kp = UDim2.new(p, R * (1 - 2 * p) - 3.5, 0.5, -3.5)
 		if animate then
 			Tween(fill, SLIDE, {Size = fs})
 			Tween(knob, SLIDE, {Position = kp})
@@ -1112,12 +1099,7 @@ local function AddSlider(W, S, o)
 		SetValue(minV + (maxV - minV) * p)
 	end
 	hit.InputBegan:Connect(function(input)
-		if el.Enabled and IsClickOrTouch(input) and W.BeginDrag(input, Update, function()
-			slDrag = false
-			KnobFx()
-		end) then
-			slDrag = true
-			KnobFx()
+		if el.Enabled and IsClickOrTouch(input) and W.BeginDrag(input, Update) then
 			Update(input)
 		end
 	end)
@@ -1205,22 +1187,16 @@ local function AddDropdown(W, S, o, multi)
 	end
 	Sync()
 
-	local isOpen, ddHover = false, false
-	function el._apply(animate)
+	function el._apply()
 		local T, enabled = W.Theme, el.Enabled
-		Anim(lbl, {TextColor3 = enabled and T.TextGray or T.TextDim}, animate)
-		Anim(btn, {BackgroundColor3 = (ddHover and enabled and not isOpen) and T.TileHover or T.DropdownBg}, animate)
-		Anim(valLbl, {TextColor3 = enabled and T.Text or T.ValueOff}, animate)
-		Anim(bs, {
-			Color = isOpen and W.Accent or (enabled and T.DropdownBorder or T.DropdownBorderOff),
-			Transparency = isOpen and (1 - W.AccentAlpha) or 0,
-		}, animate)
-		Anim(chev, {ImageColor3 = enabled and (isOpen and T.Text or T.TextGray) or T.TextDim, Rotation = isOpen and 180 or 0}, animate, MOVE_TI)
-		if icon then Anim(icon, {ImageColor3 = enabled and T.TextGray or T.TextDim}, animate) end
+		lbl.TextColor3 = enabled and T.TextGray or T.TextDim
+		btn.BackgroundColor3 = T.DropdownBg
+		valLbl.TextColor3 = enabled and T.Text or T.ValueOff
+		bs.Color = enabled and T.DropdownBorder or T.DropdownBorderOff
+		chev.ImageColor3 = enabled and T.TextGray or T.TextDim
+		if icon then icon.ImageColor3 = enabled and T.TextGray or T.TextDim end
 	end
 	W.Bind(function() el._apply() end, row)
-	btn.MouseEnter:Connect(function() ddHover = true el._apply(true) end)
-	btn.MouseLeave:Connect(function() ddHover = false el._apply(true) end)
 
 	local function IsSelected(opt)
 		if multi then return selected[opt] == true end
@@ -1239,14 +1215,7 @@ local function AddDropdown(W, S, o, multi)
 				Sync()
 				Fire()
 			end
-		end, multi, function()
-			isOpen = false
-			if row.Parent then el._apply(true) end
-		end)
-		if W.PopupOf(el) then
-			isOpen = true
-			el._apply(true)
-		end
+		end, multi)
 	end)
 
 	local function Key()
@@ -1399,8 +1368,7 @@ local function AddCardButton(W, S, o)
 	end
 	Layout()
 
-	local cardPressed = false
-	function el._apply(animate)
+	function el._apply()
 		local T, enabled = W.Theme, el.Enabled
 		local a = W.AccentAlpha * (enabled and 1 or 0.45)
 		box.BackgroundColor3 = T.DropdownBg
@@ -1411,18 +1379,14 @@ local function AddCardButton(W, S, o)
 		icon.ImageTransparency = 1 - a
 		titleLbl.TextColor3 = enabled and T.TextGray or T.TextDim
 		descLbl.TextColor3 = T.TextDim
-		Anim(action, {
-			BackgroundColor3 = (cardPressed and enabled) and T.TileHover:Lerp(T.Text, 0.06) or ((hovering and enabled) and T.TileHover or T.TileBg),
-			TextColor3 = not enabled and T.TextDim or (hovering and T.Text or T.TextGray),
-		}, animate)
-		Anim(actionStroke, {Color = (hovering and enabled) and T.DropdownBorder:Lerp(T.Text, 0.12) or (enabled and T.DropdownBorder or T.DropdownBorderOff)}, animate)
+		action.BackgroundColor3 = (hovering and enabled) and T.TileHover or T.TileBg
+		action.TextColor3 = not enabled and T.TextDim or (hovering and T.Text or T.TextGray)
+		actionStroke.Color = enabled and T.DropdownBorder or T.DropdownBorderOff
 	end
 	W.Bind(function() el._apply() end, row)
 
-	action.MouseEnter:Connect(function() hovering = true el._apply(true) end)
-	action.MouseLeave:Connect(function() hovering = false cardPressed = false el._apply(true) end)
-	action.InputBegan:Connect(function(i) if IsClickOrTouch(i) then cardPressed = true el._apply(true) end end)
-	action.InputEnded:Connect(function(i) if IsClickOrTouch(i) then cardPressed = false el._apply(true) end end)
+	action.MouseEnter:Connect(function() hovering = true el._apply() end)
+	action.MouseLeave:Connect(function() hovering = false el._apply() end)
 
 	local flashToken = 0
 	Method(el, "Flash", function(text, duration)
@@ -1667,17 +1631,14 @@ local function AccentPicker(W, S, labelText)
 	})
 	Corner(circle, 9)
 	local circleStroke = Stroke(circle, WHITE, 1)
-	local acHover = false
-	function el._apply(animate)
+	function el._apply()
 		local T, enabled = W.Theme, el.Enabled
 		icon.ImageColor3 = enabled and T.TextGray or T.TextDim
 		lbl.TextColor3 = enabled and T.TextGray or T.TextDim
 		circle.BackgroundColor3 = W.Accent
 		circle.BackgroundTransparency = 1 - W.AccentAlpha * (enabled and 1 or 0.45)
-		Anim(circleStroke, {Color = (acHover and enabled) and T.TextDim or T.BoxBorder, Thickness = (acHover and enabled) and 1.5 or 1}, animate)
+		circleStroke.Color = T.BoxBorder
 	end
-	circle.MouseEnter:Connect(function() acHover = true el._apply(true) end)
-	circle.MouseLeave:Connect(function() acHover = false el._apply(true) end)
 	W.Bind(function() el._apply() end, row)
 	W.AccentPickerEl = el
 	Method(el, "Get", function() return W.Accent, W.AccentAlpha end)
@@ -1721,10 +1682,7 @@ local function AddColorPicker(W, S, o)
 			Parent = row,
 		})
 		Corner(c, CS / 2)
-		local ci = {btn = c, el = el, index = i, stroke = Stroke(c, WHITE, 1)}
-		circles[i] = ci
-		c.MouseEnter:Connect(function() ci.hover = true el._apply(true) end)
-		c.MouseLeave:Connect(function() ci.hover = false el._apply(true) end)
+		circles[i] = {btn = c, el = el, index = i, stroke = Stroke(c, WHITE, 1)}
 	end
 
 	local function Value()
@@ -1737,13 +1695,13 @@ local function AddColorPicker(W, S, o)
 	end
 	el.Value = Value()
 
-	function el._apply(animate)
+	function el._apply()
 		local T, enabled = W.Theme, el.Enabled
 		lbl.TextColor3 = enabled and T.TextGray or T.TextDim
 		for i, c in ipairs(circles) do
 			c.btn.BackgroundColor3 = colors[i]
 			c.btn.BackgroundTransparency = 1 - alphas[i] * (enabled and 1 or 0.45)
-			Anim(c.stroke, {Color = (c.hover and enabled) and T.TextDim or T.BoxBorder, Thickness = (c.hover and enabled) and 1.5 or 1}, animate)
+			c.stroke.Color = T.BoxBorder
 		end
 	end
 	W.Bind(function() el._apply() end, row)
@@ -1842,23 +1800,16 @@ local function AddPlainButton(W, S, o)
 	})
 	Corner(b, 3)
 	local st = Stroke(b, WHITE, 1)
-	local hover, pressed = false, false
-	function el._apply(animate)
+	local hover = false
+	function el._apply()
 		local T, enabled = W.Theme, el.Enabled
-		local bg = T.DropdownBg
-		if enabled and pressed then
-			bg = T.TileHover:Lerp(T.Text, 0.06)
-		elseif enabled and hover then
-			bg = T.TileHover
-		end
-		Anim(b, {BackgroundColor3 = bg, TextColor3 = not enabled and T.TextDim or (hover and T.Text or T.TextGray)}, animate)
-		Anim(st, {Color = (hover and enabled) and T.DropdownBorder:Lerp(T.Text, 0.12) or (enabled and T.DropdownBorder or T.DropdownBorderOff)}, animate)
+		b.BackgroundColor3 = T.DropdownBg
+		st.Color = enabled and T.DropdownBorder or T.DropdownBorderOff
+		b.TextColor3 = not enabled and T.TextDim or (hover and T.Text or T.TextGray)
 	end
 	W.Bind(function() el._apply() end, row)
-	b.MouseEnter:Connect(function() hover = true el._apply(true) end)
-	b.MouseLeave:Connect(function() hover = false pressed = false el._apply(true) end)
-	b.InputBegan:Connect(function(i) if IsClickOrTouch(i) then pressed = true el._apply(true) end end)
-	b.InputEnded:Connect(function(i) if IsClickOrTouch(i) then pressed = false el._apply(true) end end)
+	b.MouseEnter:Connect(function() hover = true el._apply() end)
+	b.MouseLeave:Connect(function() hover = false el._apply() end)
 
 	local flashToken = 0
 	Method(el, "Flash", function(t, duration)
@@ -1950,35 +1901,19 @@ local function AddInput(W, S, o)
 		end
 	end
 
-	local focused, inHover = false, false
-	function el._apply(animate)
+	function el._apply()
 		local T, enabled = W.Theme, el.Enabled
-		Anim(lbl, {TextColor3 = enabled and T.TextGray or T.TextDim}, animate)
-		Anim(box, {
-			BackgroundColor3 = (inHover and enabled and not focused) and T.TileHover or T.DropdownBg,
-			TextColor3 = enabled and T.Text or T.ValueOff,
-		}, animate)
+		lbl.TextColor3 = enabled and T.TextGray or T.TextDim
+		box.BackgroundColor3 = T.DropdownBg
+		box.TextColor3 = enabled and T.Text or T.ValueOff
 		box.PlaceholderColor3 = T.TextDim
 		box.TextEditable = enabled
-		Anim(bs, {
-			Color = (focused and enabled) and W.Accent or (enabled and T.DropdownBorder or T.DropdownBorderOff),
-			Transparency = (focused and enabled) and (1 - W.AccentAlpha) or 0,
-		}, animate)
+		bs.Color = enabled and T.DropdownBorder or T.DropdownBorderOff
 		if not enabled and box:IsFocused() then box:ReleaseFocus() end
 	end
 	W.Bind(function() el._apply() end, row)
-	box.MouseEnter:Connect(function() inHover = true el._apply(true) end)
-	box.MouseLeave:Connect(function() inHover = false el._apply(true) end)
 
-	box.Focused:Connect(function()
-		focused = true
-		el._apply(true)
-	end)
-	box.FocusLost:Connect(function()
-		focused = false
-		el._apply(true)
-		Commit(box.Text)
-	end)
+	box.FocusLost:Connect(function() Commit(box.Text) end)
 	box:GetPropertyChangedSignal("Text"):Connect(function()
 		if updating then return end
 		if maxLen and #box.Text > maxLen then
@@ -2253,9 +2188,9 @@ local function BuildKeybindList(W, cfg)
 		}, animate, ROW_TI)
 		e.mode.TextColor3 = T.TextDim
 		Anim(e.pill, {BackgroundColor3 = on and T.DropdownBg:Lerp(W.Accent, 0.18 * alpha) or T.DropdownBg}, animate)
-		Anim(e.pillStroke, {Color = on and W.Accent or T.DropdownBorder, Transparency = on and (1 - alpha) or 0}, animate)
+		e.pillStroke.Color = T.DropdownBorder
 		Anim(e.key, {TextColor3 = on and W.Accent or T.TextGray}, animate)
-		e.btn.BackgroundColor3 = e.pressed and T.TileHover or T.PopupHover
+		e.btn.BackgroundColor3 = T.PopupHover
 	end
 
 	local shown = false
@@ -2370,24 +2305,12 @@ local function BuildKeybindList(W, cfg)
 		e.pillScale = Create("UIScale", {Parent = e.pill})
 		Create("UIPadding", {PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6), Parent = e.pill})
 		e.key = Label(e.pill, "", {AutoX = true, Size = UDim2.new(0, 0, 1, 0), TextSize = 10, Weight = "SemiBold"})
-		e.conn = BindPress(W, btn, function()
-			e.pressed = true
-			Anim(btn, {BackgroundTransparency = 0.25}, true)
-			e.trigger(true)
-		end, function()
-			e.pressed = false
-			Anim(btn, {BackgroundTransparency = e.hover and 0.5 or 1}, true)
-			e.trigger(false)
-		end)
-		btn.MouseEnter:Connect(function()
-			e.hover = true
-			btn.BackgroundColor3 = W.Theme.PopupHover
-			Anim(btn, {BackgroundTransparency = 0.5}, true)
-		end)
-		btn.MouseLeave:Connect(function()
-			e.hover = false
-			Anim(btn, {BackgroundTransparency = 1}, true)
-		end)
+		e.conn = BindPress(W, btn, function() e.trigger(true) end, function() e.trigger(false) end)
+		-- Touch fires MouseEnter without a matching leave, so hover highlight is mouse-only.
+		if not touch then
+			btn.MouseEnter:Connect(function() Anim(btn, {BackgroundTransparency = 0.5}, true) end)
+			btn.MouseLeave:Connect(function() Anim(btn, {BackgroundTransparency = 1}, true) end)
+		end
 		table.insert(L.Entries, e)
 		L.Refresh()
 		return e
@@ -2453,7 +2376,7 @@ local function AddKeybind(W, S, o)
 	if not ModeAllowed(mode) then table.insert(modes, 1, mode) end
 	local showModeChip = o.ShowMode ~= false and #modes > 1
 	local active = o.DefaultState == true
-	local picking, pendingMod, hover, pressedBtn = false, nil, false, false
+	local picking, pendingMod, hover = false, nil, false
 	local cancelClock = -1
 	local blacklist = {}
 	for _, b in ipairs(type(o.Blacklist) == "table" and o.Blacklist or {}) do
@@ -2559,24 +2482,11 @@ local function AddKeybind(W, S, o)
 			Position = UDim2.fromOffset(hot and 11 or 0, 0),
 			TextColor3 = not enabled and T.TextDim or ((hot or hover) and T.Text or T.TextGray),
 		}, animate, MOVE_TI)
-		local bg = T.DropdownBg
-		if pressedBtn and enabled then
-			bg = T.TileHover:Lerp(T.Text, 0.06)
-		elseif hot then
-			bg = T.DropdownBg:Lerp(W.Accent, 0.16 * alpha)
-		elseif hover and enabled then
-			bg = T.TileHover
-		end
 		Anim(btn, {
-			BackgroundColor3 = bg,
+			BackgroundColor3 = (hover and enabled and not picking) and T.TileHover or T.DropdownBg,
 			TextColor3 = not enabled and T.TextDim or ((picking or hot) and W.Accent or (hover and T.Text or T.TextGray)),
 		}, animate)
-		if not picking then
-			Anim(bs, {
-				Color = hot and W.Accent or (enabled and T.DropdownBorder or T.DropdownBorderOff),
-				Transparency = hot and (1 - alpha * 0.6) or 0,
-			}, animate)
-		end
+		Anim(bs, {Color = enabled and T.DropdownBorder or T.DropdownBorderOff}, animate)
 		timer.BackgroundColor3 = W.Accent
 		timer.BackgroundTransparency = 1 - alpha
 		if chip then
@@ -2598,21 +2508,16 @@ local function AddKeybind(W, S, o)
 		pendingMod = nil
 		pickTok = pickTok + 1
 		if W.Capturing == el then W.Capturing = nil end
-		StopTweens(bs, timer)
+		StopTweens(timer)
 		timer.Size = UDim2.new(0, 0, 0, 2)
 		Layout(true)
 		Paint(true)
 	end
 	local function Reject(msg)
 		Shake(btn, btnBase)
-		local T = W.Theme
-		SetProps(bs, {Color = rgb(235, 87, 87), Transparency = 0})
+		SetProps(btn, {TextColor3 = rgb(235, 87, 87)})
 		task.delay(0.35, function()
-			if picking then
-				bs.Color = W.Accent
-			else
-				Paint(true)
-			end
+			if row.Parent then Paint(true) end
 		end)
 		SafeCall(o.OnReject, msg)
 		if msg and W.Window then W.Window.Notify({Title = "Keybind", Content = msg, Icon = {"keyboard", "command"}, Duration = 2.5}) end
@@ -2694,8 +2599,6 @@ local function AddKeybind(W, S, o)
 		dotsStep = 0
 		Layout(true)
 		Paint(true)
-		SetProps(bs, {Color = W.Accent, Transparency = 0})
-		Tween(bs, TweenInfo.new(0.55, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {Transparency = 0.65})
 		local timeout = math.max(tonumber(o.PickTimeout) or 6, 1)
 		timer.Size = UDim2.new(1, 0, 0, 2)
 		Tween(timer, TweenInfo.new(timeout, Enum.EasingStyle.Linear), {Size = UDim2.new(0, 0, 0, 2)})
@@ -2801,38 +2704,19 @@ local function AddKeybind(W, S, o)
 			menu.BackgroundColor3 = th.PopupBg
 			ms.Color = th.DropdownBorder
 		end, menu)
-		W.PushPopup(menu, el)
+		W.PushPopup(menu, el, {Fade = true})
 		Tween(menu, TweenInfo.new(0.18, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {Size = UDim2.fromOffset(MW, h)})
 	end
 
 	btn.MouseEnter:Connect(function() hover = true Paint(true) end)
-	btn.MouseLeave:Connect(function() hover = false pressedBtn = false Paint(true) end)
+	btn.MouseLeave:Connect(function() hover = false Paint(true) end)
 	local touchConn
 	if touchTrigger then
 		-- Phones have no keys to bind, so tapping the key button runs the bind instead.
-		touchConn = BindPress(W, btn, function()
-			pressedBtn = true
-			Paint(true)
-			Trigger(true)
-		end, function()
-			pressedBtn = false
-			Paint(true)
-			Trigger(false)
-		end)
+		touchConn = BindPress(W, btn, function() Trigger(true) end, function() Trigger(false) end)
 	else
 		btn.InputBegan:Connect(function(input)
-			if IsClickOrTouch(input) and el.Enabled and not picking then
-				pressedBtn = true
-				Paint(true)
-			elseif input.UserInputType == Enum.UserInputType.MouseButton2 and not picking then
-				OpenMenu()
-			end
-		end)
-		btn.InputEnded:Connect(function(input)
-			if IsClickOrTouch(input) and pressedBtn then
-				pressedBtn = false
-				Paint(true)
-			end
+			if input.UserInputType == Enum.UserInputType.MouseButton2 and not picking then OpenMenu() end
 		end)
 		btn.MouseButton1Click:Connect(function()
 			-- The click that cancelled picking must not immediately restart it.
@@ -3152,17 +3036,16 @@ local function AddSegmented(W, S, o)
 			ind.Position, ind.Size = props.Position, props.Size
 		end
 	end
-	local segHover
-	function el._apply(animate)
+	function el._apply()
 		local T, enabled = W.Theme, el.Enabled
 		bar.BackgroundColor3 = T.DropdownBg
-		Anim(bs, {Color = enabled and T.DropdownBorder or T.DropdownBorderOff}, animate)
-		Anim(ind, {BackgroundColor3 = W.Accent, BackgroundTransparency = 1 - W.AccentAlpha * (enabled and 1 or 0.45)}, animate)
-		if lbl then Anim(lbl, {TextColor3 = enabled and T.TextGray or T.TextDim}, animate) end
+		bs.Color = enabled and T.DropdownBorder or T.DropdownBorderOff
+		ind.BackgroundColor3 = W.Accent
+		ind.BackgroundTransparency = 1 - W.AccentAlpha * (enabled and 1 or 0.45)
+		if lbl then lbl.TextColor3 = enabled and T.TextGray or T.TextDim end
 		for i, b in ipairs(buttons) do
 			local sel = options[i] == value
-			local c = not enabled and T.TextDim or (sel and OnAccent(W) or (segHover == b and T.Text or T.TextGray))
-			Anim(b, {TextColor3 = c}, animate, MOVE_TI)
+			b.TextColor3 = not enabled and T.TextDim or (sel and OnAccent(W) or T.TextGray)
 			ApplyFont(b, sel and "SemiBold" or "Medium")
 		end
 	end
@@ -3185,8 +3068,6 @@ local function AddSegmented(W, S, o)
 				Parent = bar,
 			})
 			b.MouseButton1Click:Connect(function() if el.Enabled then el.Set(opt) end end)
-			b.MouseEnter:Connect(function() segHover = b el._apply(true) end)
-			b.MouseLeave:Connect(function() if segHover == b then segHover = nil end el._apply(true) end)
 			buttons[i] = b
 		end
 		Layout(false)
@@ -3197,7 +3078,7 @@ local function AddSegmented(W, S, o)
 
 	local function Commit(changed, silent)
 		el.Value = value
-		el._apply(true)
+		el._apply()
 		if changed and not silent then el._fire(value) else el._sync(value) end
 	end
 	Method(el, "Set", function(v, silent)
@@ -3326,8 +3207,8 @@ local function AddRangeSlider(W, S, o)
 	local fill = Create("Frame", {BorderSizePixel = 0, Parent = track})
 	local knobs, strokes = {}, {}
 	for i = 1, 2 do
-		knobs[i] = Create("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.fromOffset(7, 7), BorderSizePixel = 0, ZIndex = 3, Parent = track})
-		Create("UICorner", {CornerRadius = UDim.new(1, 0), Parent = knobs[i]})
+		knobs[i] = Create("Frame", {Size = UDim2.fromOffset(7, 7), BorderSizePixel = 0, ZIndex = 3, Parent = track})
+		Corner(knobs[i], 4)
 		strokes[i] = Stroke(knobs[i], WHITE, 2)
 	end
 
@@ -3336,8 +3217,8 @@ local function AddRangeSlider(W, S, o)
 		local a, b = P(lo), P(hi)
 		local fp = UDim2.new(a, R * (1 - 2 * a), 0, 0)
 		local fs = UDim2.new(b - a, 2 * R * (a - b), 1, 0)
-		local k1 = UDim2.new(a, R * (1 - 2 * a), 0.5, 0)
-		local k2 = UDim2.new(b, R * (1 - 2 * b), 0.5, 0)
+		local k1 = UDim2.new(a, R * (1 - 2 * a) - 3.5, 0.5, -3.5)
+		local k2 = UDim2.new(b, R * (1 - 2 * b) - 3.5, 0.5, -3.5)
 		if animate then
 			local ti = TweenInfo.new(0.12, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
 			Tween(fill, ti, {Position = fp, Size = fs})
@@ -3404,12 +3285,7 @@ local function AddRangeSlider(W, S, o)
 		else
 			active = (v - lo <= hi - v) and 1 or 2
 		end
-		if W.BeginDrag(input, Update, function()
-			Anim(knobs[active], {Size = UDim2.fromOffset(7, 7)}, true, MOVE_TI)
-		end) then
-			Anim(knobs[active], {Size = UDim2.fromOffset(9, 9)}, true, MOVE_TI)
-			Update(input)
-		end
+		if W.BeginDrag(input, Update) then Update(input) end
 	end)
 
 	Method(el, "Set", function(v, silent)
@@ -3484,19 +3360,18 @@ local function AddStepper(W, S, o)
 	})
 
 	local hoverMinus, hoverPlus = false, false
-	function el._apply(animate)
+	function el._apply()
 		local T, enabled = W.Theme, el.Enabled
-		Anim(lbl, {TextColor3 = enabled and T.TextGray or T.TextDim}, animate)
+		lbl.TextColor3 = enabled and T.TextGray or T.TextDim
 		frame.BackgroundColor3 = T.DropdownBg
-		Anim(fs, {Color = enabled and T.DropdownBorder or T.DropdownBorderOff}, animate)
-		Anim(box, {TextColor3 = enabled and T.Text or T.ValueOff}, animate, TweenInfo.new(0.3, Enum.EasingStyle.Quad))
+		fs.Color = enabled and T.DropdownBorder or T.DropdownBorderOff
+		box.TextColor3 = enabled and T.Text or T.ValueOff
 		box.TextEditable = enabled
 		local canDown, canUp = enabled and value > minV, enabled and value < maxV
-		Anim(minusIc, {ImageColor3 = not canDown and T.TextDim or (hoverMinus and T.Text or T.TextGray)}, animate)
-		Anim(plusIc, {ImageColor3 = not canUp and T.TextDim or (hoverPlus and T.Text or T.TextGray)}, animate)
+		minusIc.ImageColor3 = not canDown and T.TextDim or (hoverMinus and T.Text or T.TextGray)
+		plusIc.ImageColor3 = not canUp and T.TextDim or (hoverPlus and T.Text or T.TextGray)
 		for _, s in ipairs(seps) do s.BackgroundColor3 = T.DropdownBorder end
 	end
-	local valScale = Create("UIScale", {Parent = box})
 	W.Bind(function() el._apply() end, row)
 
 	local function Show() box.Text = FormatNumber(value, decimals) .. (o.Suffix or "") end
@@ -3507,12 +3382,7 @@ local function AddStepper(W, S, o)
 		value = v
 		el.Value = v
 		Show()
-		if changed and row.Parent then
-			-- brief accent flash + pop on the number
-			SetProps(box, {TextColor3 = W.Accent})
-			Pulse(valScale, 1.15)
-		end
-		el._apply(true)
+		el._apply()
 		if changed and not silent then el._fire(v) else el._sync(v) end
 	end
 	Show()
@@ -3542,12 +3412,12 @@ local function AddStepper(W, S, o)
 		end)
 		b.MouseEnter:Connect(function()
 			if dir < 0 then hoverMinus = true else hoverPlus = true end
-			el._apply(true)
+			el._apply()
 		end)
 		b.MouseLeave:Connect(function()
 			StopHold()
 			if dir < 0 then hoverMinus = false else hoverPlus = false end
-			el._apply(true)
+			el._apply()
 		end)
 	end
 	box.Focused:Connect(function() box.Text = FormatNumber(value, decimals) end)
@@ -5203,21 +5073,17 @@ local function BuildConfigs(W, Window)
 		ApplyIcon(ic, icon)
 		local lb = Label(content, text, {AutoX = true, Size = UDim2.new(0, 0, 1, 0)})
 		lb.LayoutOrder = 2
-		local hover, pressed = false, false
-		local function Paint(animate)
+		local hover = false
+		local function Paint()
 			local T = W.Theme
-			local bg = pressed and T.TileHover:Lerp(T.Text, 0.06) or (hover and T.TileHover or T.DropdownBg)
-			local fg = hover and T.Text or T.TextGray
-			Anim(b, {BackgroundColor3 = bg}, animate)
-			Anim(st, {Color = hover and T.DropdownBorder:Lerp(T.Text, 0.12) or T.DropdownBorder}, animate)
-			Anim(lb, {TextColor3 = fg}, animate)
-			Anim(ic, {ImageColor3 = fg}, animate)
+			b.BackgroundColor3 = hover and T.TileHover or T.DropdownBg
+			st.Color = T.DropdownBorder
+			lb.TextColor3 = hover and T.Text or T.TextGray
+			ic.ImageColor3 = lb.TextColor3
 		end
-		W.Bind(function() Paint(false) end, b)
-		b.MouseEnter:Connect(function() hover = true Paint(true) end)
-		b.MouseLeave:Connect(function() hover = false pressed = false Paint(true) end)
-		b.InputBegan:Connect(function(i) if IsClickOrTouch(i) then pressed = true Paint(true) end end)
-		b.InputEnded:Connect(function(i) if IsClickOrTouch(i) then pressed = false Paint(true) end end)
+		W.Bind(Paint, b)
+		b.MouseEnter:Connect(function() hover = true Paint() end)
+		b.MouseLeave:Connect(function() hover = false Paint() end)
 		b.MouseButton1Click:Connect(fn)
 		return b
 	end
@@ -5238,20 +5104,18 @@ local function BuildConfigs(W, Window)
 		})
 		local ic = CreateIcon(b, icon, 12, UDim2.new(0.5, -6, 0.5, -6))
 		local hover = false
-		local icScale = Create("UIScale", {Parent = ic})
-		local function Paint(animate)
+		local function Paint()
 			local T = W.Theme
-			local c = (isOn and isOn()) and W.Accent or (hover and T.Text or T.NavGray)
-			Anim(ic, {ImageColor3 = c}, animate)
-			Anim(icScale, {Scale = hover and 1.12 or 1}, animate, MOVE_TI)
+			if isOn and isOn() then
+				ic.ImageColor3 = W.Accent
+			else
+				ic.ImageColor3 = hover and T.Text or T.NavGray
+			end
 		end
-		W.Bind(function() Paint(false) end, b)
-		b.MouseEnter:Connect(function() hover = true Paint(true) end)
-		b.MouseLeave:Connect(function() hover = false Paint(true) end)
-		b.MouseButton1Click:Connect(function()
-			Pulse(icScale, 1.25)
-			onClick()
-		end)
+		W.Bind(Paint, b)
+		b.MouseEnter:Connect(function() hover = true Paint() end)
+		b.MouseLeave:Connect(function() hover = false Paint() end)
+		b.MouseButton1Click:Connect(onClick)
 		return b
 	end
 
@@ -5576,8 +5440,8 @@ local function RunKeySystem(ks, ctx)
 		Parent = header,
 	})
 	local closeIc = CreateIcon(closeBtn, {"x"}, 12, UDim2.new(0.5, -6, 0.5, -6), T.NavGray)
-	closeBtn.MouseEnter:Connect(function() Anim(closeIc, {ImageColor3 = T.Text, Rotation = 90}, true, MOVE_TI) end)
-	closeBtn.MouseLeave:Connect(function() Anim(closeIc, {ImageColor3 = T.NavGray, Rotation = 0}, true, MOVE_TI) end)
+	closeBtn.MouseEnter:Connect(function() closeIc.ImageColor3 = T.Text end)
+	closeBtn.MouseLeave:Connect(function() closeIc.ImageColor3 = T.NavGray end)
 	if ks.CanClose == false then sub.Size = UDim2.new(1, -12, 1, 0) end
 
 	local body = Create("Frame", {Size = UDim2.new(1, -24, 1, -HEADER_H - 12), Position = UDim2.fromOffset(12, HEADER_H + 10), BackgroundTransparency = 1, Parent = main})
@@ -5603,12 +5467,6 @@ local function RunKeySystem(ks, ctx)
 		TextTruncate = Enum.TextTruncate.AtEnd,
 		Parent = boxFrame,
 	})
-	box.Focused:Connect(function()
-		Anim(boxStroke, {Color = K.Accent, Transparency = 1 - K.AccentAlpha}, true)
-	end)
-	box.FocusLost:Connect(function()
-		Anim(boxStroke, {Color = T.DropdownBorder, Transparency = 0}, true)
-	end)
 
 	local link = ks.GetKeyLink or ks.Link or ks.KeyLink
 	local btnRow = Create("Frame", {Size = UDim2.new(1, 0, 0, 27), Position = UDim2.fromOffset(0, 57), BackgroundTransparency = 1, Parent = body})
@@ -5637,30 +5495,20 @@ local function RunKeySystem(ks, ctx)
 		local lb = Label(content, text, {AutoX = true, Size = UDim2.new(0, 0, 1, 0)})
 		lb.LayoutOrder = 2
 		local hover, disabled = false, false
-		local pressed = false
-		local function Paint(animate)
-			local bg = T.DropdownBg
-			if pressed and not disabled then
-				bg = T.TileHover:Lerp(T.Text, 0.06)
-			elseif hover and not disabled then
-				bg = T.TileHover
-			end
-			Anim(b, {BackgroundColor3 = bg}, animate)
+		local function Paint()
+			b.BackgroundColor3 = (hover and not disabled) and T.TileHover or T.DropdownBg
 			if primary and not disabled then
-				Anim(st, {Color = K.Accent, Transparency = 1 - K.AccentAlpha}, animate)
+				st.Color, st.Transparency = K.Accent, 1 - K.AccentAlpha
 			else
-				Anim(st, {Color = T.DropdownBorder, Transparency = 0}, animate)
+				st.Color, st.Transparency = T.DropdownBorder, 0
 			end
-			local fg = disabled and T.TextDim or ((hover or primary) and T.Text or T.TextGray)
-			Anim(lb, {TextColor3 = fg}, animate)
-			Anim(ic, {ImageColor3 = (primary and not disabled) and K.Accent or fg}, animate)
+			lb.TextColor3 = disabled and T.TextDim or ((hover or primary) and T.Text or T.TextGray)
+			ic.ImageColor3 = (primary and not disabled) and K.Accent or lb.TextColor3
 		end
-		Paint(false)
-		b.MouseEnter:Connect(function() hover = true Paint(true) end)
-		b.MouseLeave:Connect(function() hover = false pressed = false Paint(true) end)
-		b.InputBegan:Connect(function(i) if IsClickOrTouch(i) then pressed = true Paint(true) end end)
-		b.InputEnded:Connect(function(i) if IsClickOrTouch(i) then pressed = false Paint(true) end end)
-		return b, lb, function(d) disabled = d Paint(true) end
+		Paint()
+		b.MouseEnter:Connect(function() hover = true Paint() end)
+		b.MouseLeave:Connect(function() hover = false Paint() end)
+		return b, lb, function(d) disabled = d Paint() end
 	end
 	local verifyBtn, verifyLbl, setVerifyDisabled
 	local getBtn
@@ -5730,7 +5578,6 @@ local function RunKeySystem(ks, ctx)
 				return
 			end
 			attempts = attempts + 1
-			Shake(holder, UDim2.fromScale(0.5, 0.5))
 			SafeCall(ks.OnFail, key, msg)
 			if maxAttempts and attempts >= maxAttempts then
 				attempts = 0
@@ -5896,7 +5743,7 @@ local function CreateWindow(o)
 		for i = #W.Popups, math.max(level, 1), -1 do
 			local e = table.remove(W.Popups, i)
 			if e.catcher then e.catcher:Destroy() end
-			if W.Alive and W.Visible ~= false and e.frame.Parent then
+			if e.fade and W.Alive and W.Visible ~= false and e.frame.Parent then
 				W.PopupFading = W.PopupFading + 1
 				FadeContent(e.frame, W.PopupLayer, UDim2.fromScale(1, 1), false, POP_OUT, e.frame.ZIndex, function(current)
 					W.PopupFading = math.max(0, W.PopupFading - 1)
@@ -5953,8 +5800,8 @@ local function CreateWindow(o)
 		frame.ZIndex = z + 1
 		frame.Parent = W.PopupLayer
 		frame.Visible = true
-		FadeContent(frame, W.PopupLayer, UDim2.fromScale(1, 1), true, POP_IN, z + 1)
-		table.insert(W.Popups, {frame = frame, owner = owner, keep = opts.Keep, catcher = catcher, onClose = opts.OnClose})
+		if opts.Fade then FadeContent(frame, W.PopupLayer, UDim2.fromScale(1, 1), true, POP_IN, z + 1) end
+		table.insert(W.Popups, {frame = frame, owner = owner, keep = opts.Keep, catcher = catcher, onClose = opts.OnClose, fade = opts.Fade})
 		W.PopupLayer.Visible = true
 	end
 	function W.SetAccent(c, alpha)
@@ -6172,19 +6019,9 @@ local function CreateWindow(o)
 		})
 		local ic = CreateIcon(b, bo.Icon or "circle", 12, UDim2.new(0.5, -6, 0.5, -6))
 		W.Paint(ic, "ImageColor3", "NavGray")
-		local hs = Create("UIScale", {Parent = ic})
-		b.MouseEnter:Connect(function()
-			Anim(ic, {ImageColor3 = W.Theme.Text}, true)
-			Anim(hs, {Scale = 1.12}, true, MOVE_TI)
-		end)
-		b.MouseLeave:Connect(function()
-			Anim(ic, {ImageColor3 = W.Theme.NavGray}, true)
-			Anim(hs, {Scale = 1}, true, MOVE_TI)
-		end)
-		b.MouseButton1Click:Connect(function()
-			Pulse(hs, 1.25)
-			SafeCall(bo.Callback)
-		end)
+		b.MouseEnter:Connect(function() ic.ImageColor3 = W.Theme.Text end)
+		b.MouseLeave:Connect(function() ic.ImageColor3 = W.Theme.NavGray end)
+		b.MouseButton1Click:Connect(function() SafeCall(bo.Callback) end)
 		table.insert(W.HeaderButtons, b)
 		W.LayoutHeader()
 		local hb = {}
