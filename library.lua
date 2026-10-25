@@ -1902,6 +1902,210 @@ local function KeyMatches(key, input)
 	return input.UserInputType == key
 end
 
+local function TouchOnly()
+	return UserInputService.TouchEnabled == true and UserInputService.KeyboardEnabled ~= true
+end
+
+-- Press/release on a GUI object that works for mouse and touch; release is tracked globally
+-- so a finger sliding off the object still ends a hold.
+local function BindPress(W, obj, onDown, onUp)
+	local held
+	obj.InputBegan:Connect(function(input)
+		if held or not IsClickOrTouch(input) then return end
+		held = input
+		SafeCall(onDown)
+	end)
+	return W.Connect(UserInputService.InputEnded, function(input)
+		if not held then return end
+		local same
+		if held.UserInputType == Enum.UserInputType.Touch then
+			same = input == held
+		else
+			same = input.UserInputType == held.UserInputType
+		end
+		if same then
+			held = nil
+			SafeCall(onUp)
+		end
+	end)
+end
+
+local function BuildKeybindList(W, cfg)
+	if cfg == false then cfg = {Visible = false} end
+	if type(cfg) ~= "table" then cfg = {} end
+	local touch = cfg.TouchMode
+	if touch == nil then touch = TouchOnly() end
+	local ROW_H = touch and 30 or 22
+	local LIST_W = touch and 210 or 186
+
+	local L = {Entries = {}, Wanted = cfg.Visible ~= false and cfg.Enabled ~= false, ShowInactive = cfg.ShowInactive ~= false, Collapsed = false}
+	W.KBList = L
+
+	local frame = Create("Frame", {
+		Name = "KeybindList",
+		Size = UDim2.fromOffset(LIST_W, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Position = cfg.Position or UDim2.fromOffset(8, 42),
+		BackgroundTransparency = 0.1,
+		BorderSizePixel = 0,
+		Active = true,
+		Visible = false,
+		Parent = W.Gui,
+	})
+	W.Paint(frame, "BackgroundColor3", "WmBg")
+	Corner(frame, 6)
+	local stroke = Stroke(frame, WHITE, 1, 0.15)
+	W.Paint(stroke, "Color", "WmStroke")
+	Create("UIListLayout", {SortOrder = Enum.SortOrder.LayoutOrder, Parent = frame})
+	Create("UIPadding", {PaddingBottom = UDim.new(0, 4), Parent = frame})
+
+	local header = Create("Frame", {Size = UDim2.new(1, 0, 0, 26), BackgroundTransparency = 1, Active = true, LayoutOrder = 0, Parent = frame})
+	local hIcon = CreateIcon(header, {"keyboard", "command"}, 12, UDim2.new(0, 10, 0.5, -6))
+	local title = Label(header, cfg.Title or "Keybinds", {Position = UDim2.fromOffset(28, 0), Size = UDim2.new(1, -80, 1, 0), Weight = "SemiBold", Truncate = true})
+	local count = Label(header, "", {Position = UDim2.new(1, -60, 0, 0), Size = UDim2.fromOffset(30, 26), TextSize = 10, Align = Enum.TextXAlignment.Right})
+	local collapse = Create("TextButton", {
+		Size = UDim2.fromOffset(24, 24),
+		Position = UDim2.new(1, -27, 0.5, -12),
+		BackgroundTransparency = 1,
+		Text = "",
+		AutoButtonColor = false,
+		Parent = header,
+	})
+	local chev = CreateIcon(collapse, {"chevron-up"}, 12, UDim2.new(0.5, -6, 0.5, -6))
+	local line = Create("Frame", {Size = UDim2.new(1, -16, 0, 1), Position = UDim2.new(0, 8, 1, -1), BorderSizePixel = 0, Parent = header})
+	MakeDraggable(W, header, frame)
+
+	local body = Create("Frame", {Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1, LayoutOrder = 1, Parent = frame})
+	Create("UIListLayout", {SortOrder = Enum.SortOrder.LayoutOrder, Parent = body})
+	Create("UIPadding", {PaddingTop = UDim.new(0, 3), Parent = body})
+	local empty = Label(body, touch and "No keybinds" or "No active keybinds", {Size = UDim2.new(1, 0, 0, ROW_H), TextSize = 10, Align = Enum.TextXAlignment.Center})
+	empty.LayoutOrder = 1e6
+
+	local function PaintEntry(e)
+		local T = W.Theme
+		local on = (e.isActive() or e.pulse == true) and true or false
+		e.bar.Visible = on
+		e.bar.BackgroundColor3 = W.Accent
+		e.bar.BackgroundTransparency = 1 - W.AccentAlpha
+		e.name.TextColor3 = not e.enabled() and T.TextDim or (on and T.Text or T.TextGray)
+		e.mode.TextColor3 = T.TextDim
+		e.pill.BackgroundColor3 = T.DropdownBg
+		e.pillStroke.Color = on and W.Accent or T.DropdownBorder
+		e.pillStroke.Transparency = on and (1 - W.AccentAlpha) or 0
+		e.key.TextColor3 = on and W.Accent or T.TextGray
+		e.row.BackgroundColor3 = T.PopupHover
+	end
+
+	function L.Refresh()
+		if not W.Alive then return end
+		local shown = 0
+		for i, e in ipairs(L.Entries) do
+			local visible = e.listed() and (L.ShowInactive or e.isActive() or e.pulse == true) and true or false
+			e.row.Visible = visible and not L.Collapsed
+			e.row.LayoutOrder = i
+			if visible then
+				shown = shown + 1
+				e.name.Text = e.getName()
+				e.mode.Text = e.getMode()
+				e.key.Text = e.getKey()
+				PaintEntry(e)
+			end
+		end
+		empty.Visible = shown == 0 and not L.Collapsed
+		count.Text = shown > 0 and tostring(shown) or ""
+		chev.Rotation = L.Collapsed and 180 or 0
+		local any = false
+		for _, e in ipairs(L.Entries) do if e.listed() then any = true break end end
+		frame.Visible = L.Wanted and any and not W.KeyLocked
+	end
+
+	W.Bind(function(T, accent)
+		hIcon.ImageColor3 = accent
+		title.TextColor3 = T.Text
+		count.TextColor3 = T.TextDim
+		chev.ImageColor3 = T.NavGray
+		line.BackgroundColor3 = T.WmDivider
+		empty.TextColor3 = T.TextDim
+		for _, e in ipairs(L.Entries) do PaintEntry(e) end
+	end, frame)
+
+	collapse.MouseButton1Click:Connect(function()
+		L.Collapsed = not L.Collapsed
+		L.Refresh()
+	end)
+
+	-- e: getName, getKey, getMode, isActive, enabled, listed, trigger(down)
+	function L.Add(e)
+		local row = Create("TextButton", {
+			Size = UDim2.new(1, 0, 0, ROW_H),
+			BackgroundTransparency = 1,
+			Text = "",
+			AutoButtonColor = false,
+			Parent = body,
+		})
+		e.row = row
+		e.bar = Create("Frame", {Size = UDim2.new(0, 2, 0, ROW_H - 10), Position = UDim2.fromOffset(5, 5), BorderSizePixel = 0, Parent = row})
+		Corner(e.bar, 1)
+		e.name = Label(row, "", {Position = UDim2.fromOffset(12, 0), Size = UDim2.new(1, -96, 1, 0), Truncate = true})
+		local right = Create("Frame", {
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, -8, 0.5, 0),
+			Size = UDim2.new(0, 0, 0, 18),
+			AutomaticSize = Enum.AutomaticSize.X,
+			BackgroundTransparency = 1,
+			Parent = row,
+		})
+		Create("UIListLayout", {
+			FillDirection = Enum.FillDirection.Horizontal,
+			HorizontalAlignment = Enum.HorizontalAlignment.Right,
+			VerticalAlignment = Enum.VerticalAlignment.Center,
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			Padding = UDim.new(0, 5),
+			Parent = right,
+		})
+		e.mode = Label(right, "", {AutoX = true, Size = UDim2.new(0, 0, 1, 0), TextSize = 10})
+		e.mode.LayoutOrder = 1
+		e.pill = Create("Frame", {Size = UDim2.new(0, 0, 0, 16), AutomaticSize = Enum.AutomaticSize.X, BorderSizePixel = 0, LayoutOrder = 2, Parent = right})
+		Corner(e.pill, 3)
+		e.pillStroke = Stroke(e.pill, WHITE, 1)
+		Create("UIPadding", {PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6), Parent = e.pill})
+		e.key = Label(e.pill, "", {AutoX = true, Size = UDim2.new(0, 0, 1, 0), TextSize = 10})
+		e.conn = BindPress(W, row, function() e.trigger(true) end, function() e.trigger(false) end)
+		row.MouseEnter:Connect(function() row.BackgroundTransparency = 0.4 end)
+		row.MouseLeave:Connect(function() row.BackgroundTransparency = 1 end)
+		table.insert(L.Entries, e)
+		L.Refresh()
+		return e
+	end
+	function L.Remove(e)
+		local i = IndexOf(L.Entries, e)
+		if i then table.remove(L.Entries, i) end
+		if e.conn then pcall(function() e.conn:Disconnect() end) end
+		if e.row then e.row:Destroy() end
+		L.Refresh()
+	end
+	function L.Pulse(e)
+		e.pulse = true
+		L.Refresh()
+		task.delay(0.25, function()
+			e.pulse = nil
+			if W.Alive then L.Refresh() end
+		end)
+	end
+
+	local api = {}
+	Method(api, "SetVisible", function(b) L.Wanted = b ~= false L.Refresh() end)
+	Method(api, "IsVisible", function() return L.Wanted end)
+	Method(api, "Toggle", function() api.SetVisible(not L.Wanted) end)
+	Method(api, "SetShowInactive", function(b) L.ShowInactive = b ~= false L.Refresh() end)
+	Method(api, "SetCollapsed", function(b) L.Collapsed = b == true L.Refresh() end)
+	Method(api, "SetTitle", function(t) title.Text = tostring(t) end)
+	Method(api, "SetPosition", function(p) frame.Position = p end)
+	Method(api, "Refresh", function() L.Refresh() end)
+	L.Frame = frame
+	return api
+end
+
 local function AddKeybind(W, S, o)
 	o = Opts(o)
 	local el, row = NewElement(W, S, "Keybind", o, 25)
@@ -1952,6 +2156,8 @@ local function AddKeybind(W, S, o)
 		Layout()
 		el._apply()
 	end
+	local entry
+	local function ListRefresh() if entry and W.KBList then W.KBList.Refresh() end end
 	local function SetKey(k, silent)
 		k = ParseKey(k)
 		local changed = k ~= key
@@ -1961,6 +2167,7 @@ local function AddKeybind(W, S, o)
 		Layout()
 		el._apply()
 		el._sync(k)
+		ListRefresh()
 		if changed and not silent then SafeCall(o.ChangedCallback, k) end
 	end
 	local function SetActive(b)
@@ -1968,20 +2175,45 @@ local function AddKeybind(W, S, o)
 		if b == active then return end
 		active = b
 		el._apply()
+		ListRefresh()
 		SafeCall(o.Callback, active)
 		SafeCall(o.ToggleCallback, active)
 	end
+	-- Same behaviour as pressing the bound key; used by touch taps and the keybind list.
+	local function Trigger(down)
+		if W.KeyLocked or not el.Enabled or not row.Parent then
+			if not down and mode == "Hold" then SetActive(false) end
+			return
+		end
+		if mode == "Toggle" then
+			if down then SetActive(not active) end
+		elseif mode == "Hold" then
+			SetActive(down)
+		elseif down then
+			if entry and W.KBList then W.KBList.Pulse(entry) end
+			SafeCall(o.Callback, true)
+		end
+	end
+	el._trigger = Trigger
 
 	btn.MouseEnter:Connect(function() hover = true el._apply() end)
 	btn.MouseLeave:Connect(function() hover = false el._apply() end)
-	btn.MouseButton1Click:Connect(function()
-		if not el.Enabled or picking then return end
-		if W.Capturing then return end
-		picking = true
-		W.Capturing = el
-		Layout()
-		el._apply()
-	end)
+	local touchConn
+	-- Phones have no keys to bind, so tapping the key button runs the bind instead.
+	local touchTrigger = o.TouchTrigger
+	if touchTrigger == nil then touchTrigger = TouchOnly() end
+	if touchTrigger then
+		touchConn = BindPress(W, btn, function() Trigger(true) end, function() Trigger(false) end)
+	else
+		btn.MouseButton1Click:Connect(function()
+			if not el.Enabled or picking then return end
+			if W.Capturing then return end
+			picking = true
+			W.Capturing = el
+			Layout()
+			el._apply()
+		end)
+	end
 
 	local conns = {}
 	table.insert(conns, W.Connect(UserInputService.InputBegan, function(input, gp)
@@ -2000,20 +2232,14 @@ local function AddKeybind(W, S, o)
 			elseif t == Enum.UserInputType.MouseButton2 or t == Enum.UserInputType.MouseButton3 then
 				W.LastCaptured = input
 				SetKey(t)
-			elseif t == Enum.UserInputType.MouseButton1 then
+			elseif t == Enum.UserInputType.MouseButton1 or t == Enum.UserInputType.Touch then
 				StopPicking()
 			end
 			return
 		end
 		if W.KeyLocked or gp or not el.Enabled or not KeyMatches(key, input) then return end
 		if W.Capturing or W.LastCaptured == input then return end
-		if mode == "Toggle" then
-			SetActive(not active)
-		elseif mode == "Hold" then
-			SetActive(true)
-		else
-			SafeCall(o.Callback, true)
-		end
+		Trigger(true)
 	end))
 	table.insert(conns, W.Connect(UserInputService.InputEnded, function(input)
 		if not row.Parent or mode ~= "Hold" or not active then return end
@@ -2027,24 +2253,57 @@ local function AddKeybind(W, S, o)
 	Method(el, "SetState", function(b) SetActive(b) end)
 	Method(el, "IsPicking", function() return picking end)
 	Method(el, "SetMode", function(m)
-		if m == "Hold" or m == "Press" or m == "Toggle" then mode = m end
+		if m == "Hold" or m == "Press" or m == "Toggle" then
+			if mode == "Hold" and m ~= "Hold" then SetActive(false) end
+			mode = m
+			ListRefresh()
+		end
 	end)
-	Method(el, "SetName", function(t) lbl.Text = tostring(t) end)
+	Method(el, "GetMode", function() return mode end)
+	Method(el, "Trigger", function(down) Trigger(down ~= false) end)
+	Method(el, "SetName", function(t) lbl.Text = tostring(t) ListRefresh() end)
+	Method(el, "SetShowInList", function(b) o.ShowInList = b ~= false ListRefresh() end)
 	Method(el, "SetChangedCallback", function(fn) o.ChangedCallback = fn end)
 	function el._serialize() return key and key.Name or "None" end
 	function el._deserialize(v) SetKey(v, true) end
 
+	if W.KBList then
+		local MODE_TEXT = {Toggle = "toggle", Hold = "hold", Press = "press"}
+		entry = W.KBList.Add({
+			getName = function() return tostring(o.ListName or lbl.Text) end,
+			getKey = function() return key and (KEY_SHORT[key.Name] or key.Name) or (touchTrigger and "Tap" or "None") end,
+			getMode = function() return MODE_TEXT[mode] or "" end,
+			isActive = function() return active end,
+			enabled = function() return el.Enabled end,
+			listed = function() return o.ShowInList ~= false and el.Visible and row.Parent ~= nil end,
+			trigger = Trigger,
+		})
+	end
+
 	local baseDestroy = el.Destroy
 	Method(el, "Destroy", function()
 		StopPicking()
+		if active then SetActive(false) end
 		for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
 		table.clear(conns)
+		if touchConn then pcall(function() touchConn:Disconnect() end) end
+		if entry and W.KBList then W.KBList.Remove(entry) end
+		entry = nil
 		baseDestroy()
 	end)
 	local baseEnabled = el.SetEnabled
 	Method(el, "SetEnabled", function(b)
-		if b == false then StopPicking() end
+		if b == false then
+			StopPicking()
+			if mode == "Hold" then SetActive(false) end
+		end
 		baseEnabled(b)
+		ListRefresh()
+	end)
+	local baseVisible = el.SetVisible
+	Method(el, "SetVisible", function(b)
+		baseVisible(b)
+		ListRefresh()
 	end)
 	local defaultKey = key
 	local defaultActive = active
@@ -3841,6 +4100,20 @@ local function BuildSettings(W, o)
 		Flag = "__ZeninWmDetails",
 		Callback = function(v) W.WM.SetModes(v) end,
 	})
+
+	if W.KBList then
+		local kl = NewSection(W, page, {Name = "Keybind List", Side = "Right"})
+		kl.AddToggle({
+			Name = "Show List", Default = W.KBList.Wanted,
+			Flag = "__ZeninKbList",
+			Callback = function(v) W.KeybindListApi.SetVisible(v) end,
+		})
+		kl.AddToggle({
+			Name = "Show Inactive", Default = W.KBList.ShowInactive,
+			Flag = "__ZeninKbInactive",
+			Callback = function(v) W.KeybindListApi.SetShowInactive(v) end,
+		})
+	end
 	return api
 end
 
@@ -5001,6 +5274,7 @@ local function CreateWindow(o)
 	})
 
 	W.WatermarkApi = BuildWatermark(W, o.Watermark)
+	W.KeybindListApi = BuildKeybindList(W, o.KeybindList)
 	BuildShell(W)
 	BuildNavigation(W)
 
@@ -5098,6 +5372,7 @@ local function CreateWindow(o)
 	local Window = {Library = Library, Settings = settingsApi}
 	W.Window = Window
 	Window.Watermark = W.WatermarkApi
+	Window.KeybindList = W.KeybindListApi
 
 	Method(Window, "AddTab", function(x) return AddTab(W, x) end)
 	Window.Tab = Window.AddTab
@@ -5278,6 +5553,7 @@ local function CreateWindow(o)
 			W.SetShown(false)
 			if keyCfg.ResetOnExpire ~= false then W.ResetElements() end
 			W.WM.ApplyLock()
+			if W.KBList then W.KBList.Refresh() end
 			SafeCall(keyCfg.OnExpire, reason)
 			for _, fn in ipairs(expireHooks) do SafeCall(fn, reason) end
 			task.spawn(function()
@@ -5299,6 +5575,7 @@ local function CreateWindow(o)
 				lastCheck = os.clock()
 				W.KeyLocked = false
 				W.WM.ApplyLock()
+				if W.KBList then W.KBList.Refresh() end
 				W.SetShown(true)
 				Window.Notify({Title = "Key", Content = "Key accepted", Icon = {"key-round", "key"}})
 			end)
