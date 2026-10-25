@@ -3504,8 +3504,6 @@ local function BuildConfigManager(W, Window, o)
 		if type(text) ~= "string" then return nil, "empty" end
 		text = text:gsub("^%s+", ""):gsub("%s+$", "")
 		if text == "" then return nil, "empty" end
-		-- Configs saved by old versions with encryption on can't be read anymore.
-		if text:sub(1, 5) == "ZENC:" then return nil, "old encrypted config, save it again" end
 		local ok, data = pcall(HttpService.JSONDecode, HttpService, text)
 		if not ok or type(data) ~= "table" then return nil, "invalid config" end
 		return data
