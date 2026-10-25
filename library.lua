@@ -597,8 +597,11 @@ local function Finish(el, o)
 	if el.Flag then Library.Flags[el.Flag] = el.Get() end
 	if o.DependsOn then el.DependsOn(o.DependsOn, o.InvertDependency) end
 	el._apply(false)
+	do
+		local ok, d = pcall(SerializeFlag, el)
+		if ok then el._default = d end
+	end
 	if el.Flag then
-		el._default = SerializeFlag(el)
 		local pending = el._win.PendingFlags
 		if pending and pending[el.Flag] ~= nil then
 			local v = pending[el.Flag]
@@ -2043,6 +2046,13 @@ local function AddKeybind(W, S, o)
 		if b == false then StopPicking() end
 		baseEnabled(b)
 	end)
+	local defaultKey = key
+	local defaultActive = active
+	function el._reset()
+		StopPicking()
+		SetKey(defaultKey, true)
+		SetActive(defaultActive and mode == "Toggle")
+	end
 	return Finish(el, o)
 end
 
@@ -2316,6 +2326,8 @@ local function AddProgressBar(W, S, o)
 	end)
 	Method(el, "GetMax", function() return maxV end)
 	Method(el, "SetName", function(t) lbl.Text = tostring(t) end)
+	local defaultValue = value
+	function el._reset() el.Set(defaultValue, true) end
 	if o.DependsOn then el.DependsOn(o.DependsOn, o.InvertDependency) end
 	el._apply()
 	return el
@@ -3100,8 +3112,13 @@ local function BuildWatermark(W, cfg)
 	end)
 
 	local api = {}
-	Method(api, "SetVisible", function(b) frame.Visible = b ~= false end)
-	Method(api, "IsVisible", function() return frame.Visible end)
+	local wanted = frame.Visible
+	Method(api, "SetVisible", function(b)
+		wanted = b ~= false
+		frame.Visible = wanted and not W.KeyLocked
+	end)
+	Method(api, "IsVisible", function() return wanted end)
+	function WM.ApplyLock() frame.Visible = wanted and not W.KeyLocked end
 	Method(api, "Toggle", function() frame.Visible = not frame.Visible end)
 	Method(api, "SetTitle", function(t) WM.TitleItem.label.Text = tostring(t) end)
 	Method(api, "SetSite", function(t) WM.SetSite(t) end)
@@ -5011,6 +5028,23 @@ local function CreateWindow(o)
 			Fader.GroupTransparency = 0
 		end
 	end
+	-- Returns every user element to its default, firing callbacks so script features switch off.
+	function W.ResetElements()
+		W.ClosePopup()
+		W.CancelDrag()
+		W.PendingFlags = nil
+		for _, el in ipairs(CopyList(W.Elements)) do
+			local f = el.Flag
+			if not (f and f:sub(1, 7) == "__Zenin") then
+				if el._reset then
+					SafeCall(el._reset)
+				elseif el._default ~= nil then
+					ApplyFlag(el, el._default)
+				end
+			end
+		end
+	end
+
 	function W.SetShown(show, instant)
 		if not W.Alive then return end
 		show = show ~= false
@@ -5241,9 +5275,11 @@ local function CreateWindow(o)
 			W.KeyLocked = true
 			reason = reason or "Your key has expired"
 			backend.Forget()
+			W.SetShown(false)
+			if keyCfg.ResetOnExpire ~= false then W.ResetElements() end
+			W.WM.ApplyLock()
 			SafeCall(keyCfg.OnExpire, reason)
 			for _, fn in ipairs(expireHooks) do SafeCall(fn, reason) end
-			W.SetShown(false)
 			task.spawn(function()
 				local ctx2 = setmetatable({
 					Reason = reason,
@@ -5262,6 +5298,7 @@ local function CreateWindow(o)
 				table.clear(warned)
 				lastCheck = os.clock()
 				W.KeyLocked = false
+				W.WM.ApplyLock()
 				W.SetShown(true)
 				Window.Notify({Title = "Key", Content = "Key accepted", Icon = {"key-round", "key"}})
 			end)

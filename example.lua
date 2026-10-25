@@ -43,7 +43,9 @@ local Window = Library:CreateWindow({
 		MaxAttempts = 5,
 		Cooldown = 30,
 		OnSuccess = function(key, info) print("Key accepted:", key, info.Expires and ("expires " .. os.date("%c", info.Expires)) or "lifetime") end,
-		-- When the key expires or is revoked, the menu closes and the key is asked again.
+		-- When the key expires or is revoked: the menu closes, every element returns to its default
+		-- (callbacks fire, so features switch off), keybinds are released, the watermark is hidden,
+		-- and the key is asked again. ResetOnExpire = false keeps element values instead.
 		OnExpire = function(reason) print("Key expired:", reason) end,
 	},
 })
